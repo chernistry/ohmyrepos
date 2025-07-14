@@ -1,0 +1,114 @@
+# Sensitive Data
+/.idea/
+/archive/
+/data/repos.json
+/.docs/
+session_store/*.json
+.DS_Store
+
+# Ignore Default Files
+/shelf/
+/workspace.xml
+
+# Editor-Based HTTP Client Requests
+/httpRequests/
+
+# Datasource Local Storage Ignored Files
+/dataSources/
+/dataSources.local.xml
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime Data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Dependency Directories
+node_modules/
+bower_components/
+/vendor/  # PHP Composer
+
+# Build Directories
+dist/
+build/
+out/
+target/
+
+# IDE & Editor Configurations
+/.idea/
+/.vscode/
+/.dev/
+*.iml
+
+# OS-Specific Files
+.DS_Store  # macOS metadata
+Thumbs.db  # Windows thumbnail cache
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+
+# JavaScript & TypeScript
+.eslintcache
+coverage/
+*.tsbuildinfo
+
+# Ruby
+*.gem
+.bundle/
+
+# Go
+/bin/
+/pkg/
+
+# Rust / Cargo
+/target/
+
+# C & C++
+*.o
+*.obj
+*.so
+*.dll
+*.dylib
+
+# Environment Files
+.env
+.env.local
+.env.*.local
+
+# Git-Specific Files
+.git/
+.gitignore
+
+# Miscellaneous Binaries & Archives
+*.exe
+*.out
+*.app
+*.dmg
+*.iso
+*.tar.gz
+*.zip
+
+# Temporary & Backup Files
+*~
+*.swp
+*.swo
+
+# macOS Finder Attributes & Trash Files
+.AppleDouble
+.Trashes
+repositories.json
