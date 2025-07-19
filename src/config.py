@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     RERANKER_MODEL: str = "jina-reranker-m0"
     RERANKER_URL: str = "https://api.jina.ai/v1/rerank"
     RERANKER_TIMEOUT: int = 30
+
+    # Hybrid retriever
+    BM25_VARIANT: str = "okapi"  # okapi | plus
+    BM25_WEIGHT: float = 0.4
+    VECTOR_WEIGHT: float = 0.6
     
     model_config = SettingsConfigDict(
         env_file=".env",
