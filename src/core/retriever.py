@@ -12,6 +12,7 @@ import asyncio
 
 # BM25 implementation
 from rank_bm25 import BM25Okapi
+from rank_bm25 import BM25Plus
 import numpy as np
 
 # Исправляем импорты для совместимости
@@ -37,7 +38,10 @@ class HybridRetriever:
         qdrant_store: Optional[QdrantStore] = None,
         repos_json_path: str = "repos.json",
         bm25_weight: float = 0.3,
-        vector_weight: float = 0.7,
+        vector_weight: float = 0.6,
+        bm25_variant: str = "plus",
+        merge_strategy: str = "rrf",  # 'linear' or 'rrf'
+        rrf_k: int = 60,
     ) -> None:
         """Initialize the hybrid retriever.
         
@@ -65,6 +69,10 @@ class HybridRetriever:
         self.bm25_index = None
         self.repo_data = []
         self.repo_corpus = []
+        
+        self._bm25_variant = bm25_variant.lower()
+        self.merge_strategy = merge_strategy.lower()
+        self.rrf_k = rrf_k
         
         logger.debug("Initializing HybridRetriever")
     
@@ -125,8 +133,11 @@ class HybridRetriever:
             return
         
         try:
-            self.bm25_index = BM25Okapi(self.repo_corpus)
-            logger.info("BM25 index created successfully")
+            if self._bm25_variant == "plus":
+                self.bm25_index = BM25Plus(self.repo_corpus)
+            else:
+                self.bm25_index = BM25Okapi(self.repo_corpus)
+            logger.info("BM25 index created successfully (%s)", self._bm25_variant)
         except Exception as e:
             logger.error(f"Error creating BM25 index: {e}")
             self.bm25_index = None
@@ -243,13 +254,37 @@ class HybridRetriever:
         Returns:
             Combined and ranked results
         """
-        # Create a mapping of repo_name to result for easy lookup
+        if self.merge_strategy == "rrf":
+            # Apply Reciprocal Rank Fusion over individual ranked lists
+            ranked_lists = [
+                sorted(vector_results, key=lambda x: x["score"], reverse=True),
+                sorted(bm25_results, key=lambda x: x["score"], reverse=True),
+            ]
+
+            scores: Dict[str, Dict[str, Any]] = {}
+            for lst in ranked_lists:
+                for rank, res in enumerate(lst):
+                    rr = 1.0 / (self.rrf_k + rank + 1)
+                    repo_name = res["repo_name"]
+                    if repo_name not in scores:
+                        # Start aggregation record
+                        scores[repo_name] = {**res, "score": 0.0, "vector_score": 0.0, "bm25_score": 0.0}
+                    scores[repo_name]["score"] += rr
+                    if res in vector_results:
+                        scores[repo_name]["vector_score"] = res["score"]
+                    else:
+                        scores[repo_name]["bm25_score"] = res["score"]
+
+            fused = list(scores.values())
+            fused.sort(key=lambda x: x["score"], reverse=True)
+            return fused[:limit]
+
+        # Fallback to linear blend (existing behaviour)
         combined_map = {}
-        
+
         # Process vector results
         for result in vector_results:
             repo_name = result["repo_name"]
-            # Normalize vector scores to 0-1 range (they're already cosine similarity)
             score = result["score"] * self.vector_weight
             combined_map[repo_name] = {
                 **result,
@@ -257,37 +292,26 @@ class HybridRetriever:
                 "vector_score": result["score"],
                 "bm25_score": 0.0,
             }
-        
-        # Find max BM25 score for normalization
-        max_bm25_score = 1.0
-        if bm25_results:
-            max_bm25_score = max(result["score"] for result in bm25_results) or 1.0
-        
-        # Process BM25 results
+
+        max_bm25_score = max((r["score"] for r in bm25_results), default=1.0)
+
         for result in bm25_results:
             repo_name = result["repo_name"]
-            # Normalize BM25 score to 0-1 range
             normalized_bm25_score = result["score"] / max_bm25_score
             weighted_bm25_score = normalized_bm25_score * self.bm25_weight
-            
             if repo_name in combined_map:
-                # Update existing entry
                 combined_map[repo_name]["score"] += weighted_bm25_score
                 combined_map[repo_name]["bm25_score"] = normalized_bm25_score
             else:
-                # Add new entry
                 combined_map[repo_name] = {
                     **result,
                     "score": weighted_bm25_score,
                     "vector_score": 0.0,
                     "bm25_score": normalized_bm25_score,
                 }
-        
-        # Convert map to list and sort by combined score
+
         combined_results = list(combined_map.values())
         combined_results.sort(key=lambda x: x["score"], reverse=True)
-        
-        # Return top results
         return combined_results[:limit]
     
     async def close(self) -> None:

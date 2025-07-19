@@ -39,7 +39,11 @@ st.set_page_config(
 @st.cache_resource
 def get_retriever():
     """Initialize and return the retriever."""
-    retriever = HybridRetriever()
+    retriever = HybridRetriever(
+        bm25_variant=settings.BM25_VARIANT,
+        bm25_weight=settings.BM25_WEIGHT,
+        vector_weight=settings.VECTOR_WEIGHT,
+    )
     
     # Инициализируем retriever синхронно
     # Используем nest_asyncio для решения проблемы с вложенными циклами событий

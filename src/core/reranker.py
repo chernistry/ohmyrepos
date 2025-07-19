@@ -1,6 +1,9 @@
 """Reranking module for Oh My Repos.
 
 This module provides functionality to rerank search results using Jina AI reranker model.
+
+Note:
+    Avoid using unescaped backslashes in docstrings (e.g., use `\\(` instead of `\(`).
 """
 
 import logging
@@ -61,14 +64,14 @@ class JinaReranker:
         top_k: int = 25,
     ) -> List[Dict[str, Any]]:
         """Rerank search results using Jina AI reranker.
-        
+
         Args:
-            query: The original search query
-            results: List of search results to rerank
-            top_k: Number of top results to return after reranking
-            
+            query (str): The original search query.
+            results (List[Dict[str, Any]]): List of search results to rerank.
+            top_k (int): Number of top results to return after reranking.
+
         Returns:
-            Reranked list of repository search results
+            List[Dict[str, Any]]: Reranked list of repository search results.
         """
         if not self.api_key:
             logger.warning("Reranker API key not provided, returning original results")
@@ -163,13 +166,13 @@ class JinaReranker:
     
     def _default_ranking(self, results: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:
         """Provide a fallback ranking when the API call fails.
-        
+
         Args:
-            results: Original search results
-            top_k: Number of top results to return
-            
+            results (List[Dict[str, Any]]): Original search results.
+            top_k (int): Number of top results to return.
+
         Returns:
-            List of results with default scoring
+            List[Dict[str, Any]]: List of results with default scoring.
         """
         logger.info("Using default ranking for results")
         
