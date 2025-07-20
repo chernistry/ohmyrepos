@@ -64,27 +64,53 @@ def make_clickable(url, text):
     """Make a clickable link for Streamlit dataframe."""
     return f'<a href="{url}" target="_blank">{text}</a>'
 
-def search_repos_sync(query: str, top_k: int = 25, filter_tags: Optional[List[str]] = None):
-    """Synchronous wrapper for search_repos."""
+def search_repos_sync(
+    query: str,
+    top_k: int = 25,
+    filter_tags: Optional[List[str]] = None,
+    filter_language: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Synchronous wrapper for the asynchronous search.
+
+    Args:
+        query: User search query.
+        top_k: Number of final results requested.
+        filter_tags: Optional tag filter for retriever.
+        filter_language: Optional programming language filter (case-insensitive).
+    """
     # Используем nest_asyncio для решения проблемы с вложенными циклами событий
     import nest_asyncio
     nest_asyncio.apply()
-    
-    # Теперь можно безопасно запустить асинхронный код
-    return asyncio.run(_search_repos(query, top_k, filter_tags))
 
-async def _search_repos(query: str, top_k: int = 25, filter_tags: Optional[List[str]] = None):
-    """Search repositories with the given query."""
+    # Запускаем асинхронный поиск
+    return asyncio.run(_search_repos(query, top_k, filter_tags, filter_language))
+
+async def _search_repos(
+    query: str,
+    top_k: int = 25,
+    filter_tags: Optional[List[str]] = None,
+    filter_language: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Async search with optional language filter.
+
+    The language filter is applied before reranking to keep the reranker
+    focused on relevant documents only.
+    """
     retriever = get_retriever()
     reranker = get_reranker()
-    
-    # Perform hybrid search
-    results = await retriever.search(query, limit=top_k*2, filter_tags=filter_tags)
-    
-    # Rerank results if we have more than 1 result
+
+    # Perform hybrid search (over-retrieve for better rerank quality)
+    results = await retriever.search(query, limit=top_k * 2, filter_tags=filter_tags)
+
+    # Optional language filter (case-insensitive exact match)
+    if filter_language:
+        lang = filter_language.lower().strip()
+        results = [r for r in results if r.get("language", "").lower() == lang]
+
+    # Rerank if multiple results remain
     if len(results) > 1:
-        results = await reranker.rerank(query, results, top_k=top_k)
-    
+        results = await reranker.rerank(query, results, top_k=min(top_k, len(results)))
+
     return results
 
 # UI Components
@@ -96,7 +122,7 @@ def render_header():
     """)
 
 def render_search_form():
-    """Render the search form."""
+    """Render the search form, including new filters."""
     with st.form("search_form"):
         query = st.text_input("Search Query", placeholder="Enter your search query here...")
         col1, col2 = st.columns([3, 1])
@@ -104,15 +130,22 @@ def render_search_form():
             top_k = st.slider("Number of results", min_value=5, max_value=50, value=25, step=5)
         with col2:
             search_button = st.form_submit_button("Search")
-    
-    return query, top_k, search_button
 
-def render_results(results: List[Dict[str, Any]]):
-    """Render search results."""
+        # New controls
+        language_filter = st.text_input("Filter by Language (optional)", placeholder="Python")
+        sort_by_stars = st.checkbox("Sort by Stars (descending)", value=False)
+
+    return query, top_k, language_filter, sort_by_stars, search_button
+
+def render_results(results: List[Dict[str, Any]], sort_by_stars: bool = False):
+    """Render search results with optional sorting."""
+    if sort_by_stars:
+        results = sorted(results, key=lambda x: x.get("stars", 0), reverse=True)
+
     if not results:
         st.info("No results found. Try a different search query.")
         return
-    
+
     # Convert results to DataFrame for display
     df = pd.DataFrame(results)
     
@@ -168,14 +201,14 @@ def render_results(results: List[Dict[str, Any]]):
 def main():
     """Main application entry point."""
     render_header()
-    query, top_k, search_button = render_search_form()
-    
+    query, top_k, language_filter, sort_by_stars, search_button = render_search_form()
+
     # Handle search
     if search_button and query:
         with st.spinner("Searching repositories..."):
             # Используем синхронную обертку
-            results = search_repos_sync(query, top_k)
-            render_results(results)
+            results = search_repos_sync(query, top_k, filter_language=language_filter)
+            render_results(results, sort_by_stars)
     elif search_button and not query:
         st.warning("Please enter a search query.")
 
