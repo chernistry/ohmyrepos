@@ -15,7 +15,7 @@ from rank_bm25 import BM25Okapi
 from rank_bm25 import BM25Plus
 import numpy as np
 
-# Исправляем импорты для совместимости
+# Fix imports for compatibility
 try:
     from src.config import settings
     from src.core.storage import QdrantStore

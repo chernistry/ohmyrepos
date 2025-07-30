@@ -11,7 +11,7 @@ import aiohttp
 import time
 from typing import Dict, List, Optional, Any, Union
 
-# Исправляем импорты для совместимости
+# Fix imports for compatibility
 try:
     from src.config import settings
 except ImportError:
