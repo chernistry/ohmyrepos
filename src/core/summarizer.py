@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple, Callable
 
-# Исправляем импорты для совместимости
+# Fix imports for compatibility
 try:
     from src.llm.generator import LLMGenerator
     from src.llm.prompt_builder import PromptBuilder

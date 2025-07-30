@@ -11,7 +11,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qdrant_models
 from qdrant_client.http.exceptions import UnexpectedResponse
 
-# Исправляем импорты для совместимости
+# Fix imports for compatibility
 try:
     from src.config import settings
     from src.core.embeddings import EmbeddingFactory, EmbeddingProvider
@@ -51,7 +51,7 @@ class QdrantStore:
         if not self.url:
             raise ValueError("Qdrant URL must be provided")
         
-        # Инициализируем клиент с правильными параметрами
+        # Initialize client with correct parameters
         if self.api_key:
             self.client = QdrantClient(
                 url=self.url,
@@ -73,7 +73,7 @@ class QdrantStore:
             collections = self.client.get_collections().collections
             collection_names = [c.name for c in collections]
             
-            # Получаем размерность эмбеддингов от провайдера
+            # Get embedding dimension from provider
             embedding_dimension = self.embedding_provider.dimension
             logger.info(f"Using embedding dimension: {embedding_dimension}")
             
@@ -96,7 +96,7 @@ class QdrantStore:
                     field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
                 )
             else:
-                # Проверяем размерность существующей коллекции
+                # Check dimension of existing collection
                 collection_info = self.client.get_collection(COLLECTION_NAME)
                 existing_dimension = collection_info.config.params.vectors.size
                 
@@ -107,7 +107,7 @@ class QdrantStore:
                         f"Recreating collection."
                     )
                     
-                    # Удаляем и пересоздаем коллекцию с правильной размерностью
+                    # Delete and recreate collection with correct dimension
                     self.client.delete_collection(COLLECTION_NAME)
                     
                     self.client.create_collection(
@@ -238,14 +238,14 @@ class QdrantStore:
             for repo in batch:
                 repo["has_embedding"] = True
                 
-                # Также обновляем статус в исходном списке repositories
+                # Also update status in the original repositories list
                 repo_name = repo.get("name", "")
                 for original_repo in repositories:
                     if original_repo.get("name", "") == repo_name:
                         original_repo["has_embedding"] = True
                         break
         
-        # Проверяем, что все репозитории имеют флаг has_embedding
+        # Check that all repositories have the has_embedding flag
         repos_with_embeddings = sum(1 for repo in repositories if repo.get("has_embedding", False))
         logger.info(f"Total repositories with embeddings: {repos_with_embeddings} out of {len(repositories)}")
         
@@ -267,7 +267,7 @@ class QdrantStore:
         # Generate embeddings
         embeddings = await self.embedding_provider.embed_documents(summaries)
         
-        # Проверка размерности векторов
+        # Check vector dimension
         if embeddings:
             logger.info(f"Generated {len(embeddings)} embeddings with dimension {len(embeddings[0])}")
         
@@ -305,7 +305,7 @@ class QdrantStore:
         
         # Upsert points to Qdrant
         try:
-            # Получаем информацию о коллекции для проверки размерности
+            # Get collection info to check dimension
             collection_info = self.client.get_collection(COLLECTION_NAME)
             expected_dimension = collection_info.config.params.vectors.size
             actual_dimension = len(embeddings[0]) if embeddings else 0

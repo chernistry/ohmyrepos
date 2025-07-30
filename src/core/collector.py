@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Any, Set
 
 import httpx
 
-# Исправляем импорты для совместимости
+# Fix imports for compatibility
 try:
     from src.config import settings
 except ImportError:
@@ -21,7 +21,7 @@ except ImportError:
     except ImportError:
         import sys
         from pathlib import Path
-        # Добавляем корневую директорию проекта в путь поиска модулей
+        # Add the project's root directory to the module search path
         sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
         from src.config import settings
 
