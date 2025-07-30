@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-# Исправляем импорты для совместимости
+# Fix imports for compatibility
 try:
     from src.config import settings
 except ImportError:
