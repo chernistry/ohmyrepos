@@ -12,10 +12,10 @@ import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-# Добавляем корневую директорию проекта в sys.path
+# Add the project's root directory to the module search path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Теперь импортируем модули из проекта
+# Now import modules from the project
 from src.core.retriever import HybridRetriever
 from src.core.reranker import JinaReranker
 from src.config import settings
@@ -78,11 +78,11 @@ def search_repos_sync(
         filter_tags: Optional tag filter for retriever.
         filter_language: Optional programming language filter (case-insensitive).
     """
-    # Используем nest_asyncio для решения проблемы с вложенными циклами событий
+    # Use nest_asyncio to solve nested event loop issues
     import nest_asyncio
     nest_asyncio.apply()
 
-    # Запускаем асинхронный поиск
+    # Run the asynchronous search
     return asyncio.run(_search_repos(query, top_k, filter_tags, filter_language))
 
 async def _search_repos(
@@ -206,7 +206,7 @@ def main():
     # Handle search
     if search_button and query:
         with st.spinner("Searching repositories..."):
-            # Используем синхронную обертку
+            # Use synchronous wrapper
             results = search_repos_sync(query, top_k, filter_language=language_filter)
             render_results(results, sort_by_stars)
     elif search_button and not query:

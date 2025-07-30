@@ -8,7 +8,7 @@ import json
 import logging
 from typing import Dict, Optional, Any, Union, AsyncGenerator
 
-# Исправляем импорты для совместимости
+# Fix imports for compatibility
 try:
     from src.llm.chat_adapter import ChatAdapter
     from src.llm.prompt_builder import PromptBuilder

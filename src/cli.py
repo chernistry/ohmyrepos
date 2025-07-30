@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
 
-# Исправляем импорты для совместимости
+# Fix imports for compatibility
 try:
     from src.core.collector import RepoCollector
     from src.core.storage import QdrantStore
@@ -527,16 +527,16 @@ async def _process_repos(
     
     try:
         await store.setup_collection()
-        # Обновляем enriched_repos с информацией о статусе эмбеддингов
+        # Update enriched_repos with embedding status
         enriched_repos = await store.store_repositories(enriched_repos)
         
-        # Статистика по эмбеддингам
+        # Embedding statistics
         new_embeddings = sum(1 for repo in enriched_repos if repo.get("has_embedding", False))
         skipped_embeddings = len(enriched_repos) - new_embeddings
         
         console.print(f"[bold]Embedding status:[/bold] {new_embeddings} repositories with embeddings, {skipped_embeddings} skipped (already had embeddings)")
         
-        # Сохраняем обновленный JSON с информацией о статусе эмбеддингов
+        # Save updated JSON with embedding status
         if output_file:
             output_file.write_text(json.dumps(enriched_repos, indent=2), encoding="utf-8")
             console.print(f"Updated repository data with embedding status saved to [bold]{output_file}[/bold]")
@@ -607,12 +607,12 @@ async def _embed_only_repos(
         # Process all repositories to update embedding status
         updated_repos = await store.store_repositories(repos)
         
-        # Статистика по эмбеддингам
+        # Embedding statistics
         new_embeddings = sum(1 for repo in updated_repos if repo.get("has_embedding", False) and repo.get("name", "") in [r.get("name", "") for r in valid_repos])
         
         console.print(f"[bold]Embedding status:[/bold] {new_embeddings} new repositories with embeddings")
         
-        # Сохраняем обновленный JSON с информацией о статусе эмбеддингов
+        # Save updated JSON with embedding status
         if output_file:
             output_file.write_text(json.dumps(updated_repos, indent=2), encoding="utf-8")
             console.print(f"Updated repository data with embedding status saved to [bold]{output_file}[/bold]")

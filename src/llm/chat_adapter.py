@@ -15,7 +15,7 @@ Usage
 import logging
 from typing import Any, AsyncGenerator, Dict, Union, Optional
 
-# Исправляем импорты для совместимости
+# Fix imports for compatibility
 try:
     from src.config import settings
     from src.llm.providers import get_provider, BaseLLMProvider
