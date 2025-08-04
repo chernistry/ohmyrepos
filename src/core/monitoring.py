@@ -35,8 +35,10 @@ structlog.configure(
 )
 
 # Prometheus metrics
-API_REQUESTS_TOTAL = Counter(
-    "api_requests_total", "Total API requests", ["provider", "method", "status"]
+# Используем один набор метрик с уникальными именами
+# Исправлено дублирование метрик api_requests/api_requests_total
+API_METRICS = Counter(
+    "api_metrics", "API metrics", ["provider", "method", "status"]
 )
 
 REQUEST_DURATION_SECONDS = Histogram(
@@ -50,20 +52,20 @@ ACTIVE_CONNECTIONS = Gauge(
     "active_connections_total", "Number of active connections", ["provider"]
 )
 
-EMBEDDING_OPERATIONS_TOTAL = Counter(
-    "embedding_operations_total",
-    "Total embedding operations",
+EMBEDDING_OPERATIONS = Counter(
+    "embedding_operations",
+    "Embedding operations",
     ["provider", "model", "status"],
 )
 
-VECTOR_DB_OPERATIONS_TOTAL = Counter(
-    "vector_db_operations_total",
-    "Total vector database operations",
+VECTOR_DB_OPERATIONS = Counter(
+    "vector_db_operations",
+    "Vector database operations",
     ["operation", "status"],
 )
 
-RERANK_OPERATIONS_TOTAL = Counter(
-    "rerank_operations_total", "Total rerank operations", ["provider", "status"]
+RERANK_OPERATIONS = Counter(
+    "rerank_operations", "Rerank operations", ["provider", "status"]
 )
 
 
@@ -120,7 +122,7 @@ class MetricsCollector:
     @staticmethod
     def record_api_request(provider: str, method: str, status: str) -> None:
         """Record an API request."""
-        API_REQUESTS_TOTAL.labels(provider=provider, method=method, status=status).inc()
+        API_METRICS.labels(provider=provider, method=method, status=status).inc()
 
     @staticmethod
     def record_request_duration(provider: str, method: str, duration: float) -> None:
@@ -137,19 +139,19 @@ class MetricsCollector:
     @staticmethod
     def record_embedding_operation(provider: str, model: str, status: str) -> None:
         """Record an embedding operation."""
-        EMBEDDING_OPERATIONS_TOTAL.labels(
+        EMBEDDING_OPERATIONS.labels(
             provider=provider, model=model, status=status
         ).inc()
 
     @staticmethod
     def record_vector_db_operation(operation: str, status: str) -> None:
         """Record a vector database operation."""
-        VECTOR_DB_OPERATIONS_TOTAL.labels(operation=operation, status=status).inc()
+        VECTOR_DB_OPERATIONS.labels(operation=operation, status=status).inc()
 
     @staticmethod
     def record_rerank_operation(provider: str, status: str) -> None:
         """Record a rerank operation."""
-        RERANK_OPERATIONS_TOTAL.labels(provider=provider, status=status).inc()
+        RERANK_OPERATIONS.labels(provider=provider, status=status).inc()
 
 
 # Global metrics collector instance

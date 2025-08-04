@@ -84,7 +84,7 @@ class LLMProviderFactory:
     def create_openai_provider(
         api_key: str,
         base_url: str = "https://api.openai.com/v1",
-        model: str = "gpt-4o-mini",
+        model: str = "deepseek/deepseek-r1-0528:free",
         **kwargs: Any,
     ) -> OpenAIProvider:
         """Create an OpenAI provider with direct configuration.

@@ -87,7 +87,7 @@ class LLMConfig(BaseModel):
 
     provider: LLMProvider = Field(default=LLMProvider.OPENAI)
     base_url: HttpUrl = Field(default="https://api.openai.com/v1")
-    model: str = Field(default="gpt-4o-mini")
+    model: str = Field(default="deepseek/deepseek-r1-0528:free")
     api_key: Optional[SecretStr] = Field(default=None)
     timeout: int = Field(default=60, ge=5, le=300)
     max_retries: int = Field(default=3, ge=0, le=10)
@@ -163,8 +163,8 @@ class SearchConfig(BaseModel):
     """Search configuration."""
 
     bm25_variant: Literal["okapi", "plus"] = Field(default="plus")
-    bm25_weight: float = Field(default=0.4, ge=0.0, le=1.0)
-    vector_weight: float = Field(default=0.6, ge=0.0, le=1.0)
+    bm25_weight: float = Field(default=0.5, ge=0.0, le=1.0)  # Увеличен вес BM25 для лучших результатов по ключевым словам
+    vector_weight: float = Field(default=0.5, ge=0.0, le=1.0)
     rrf_k: int = Field(default=60, ge=1, le=1000)
     max_results: int = Field(default=100, ge=1, le=1000)
     enable_reranking: bool = Field(default=True)
@@ -261,7 +261,7 @@ class Settings(BaseSettings):
             provider = self.CHAT_LLM_PROVIDER or os.getenv("CHAT_LLM_PROVIDER", "openai")
             api_key = self.CHAT_LLM_API_KEY or os.getenv("CHAT_LLM_API_KEY", "")
             base_url = os.getenv("CHAT_LLM_BASE_URL", "https://api.openai.com/v1")
-            model = os.getenv("CHAT_LLM_MODEL", "gpt-4o-mini")
+            model = os.getenv("CHAT_LLM_MODEL", "deepseek/deepseek-r1-0528:free")
             self.llm = LLMConfig(
                 provider=LLMProvider(provider),
                 base_url=base_url,

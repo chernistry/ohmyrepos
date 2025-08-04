@@ -56,10 +56,10 @@ class JinaReranker:
             url: Reranker API URL
             timeout: API request timeout in seconds
         """
-        self.api_key = api_key or settings.EMBEDDING_MODEL_API_KEY
-        self.model = model or settings.RERANKER_MODEL
-        self.url = url or settings.RERANKER_URL
-        self.timeout = timeout or settings.RERANKER_TIMEOUT
+        self.api_key = api_key or (settings.reranker.api_key.get_secret_value() if settings.reranker else None)
+        self.model = model or (settings.reranker.model if settings.reranker else "jina-reranker-v2-base-multilingual")
+        self.url = url or (str(settings.reranker.base_url) if settings.reranker else "https://api.jina.ai/v1/rerank")
+        self.timeout = timeout or (settings.reranker.timeout if settings.reranker else 30)
 
         if not self.api_key:
             logger.warning("Jina AI API key not provided, reranker will not work")
@@ -69,24 +69,10 @@ class JinaReranker:
             "Accept": "application/json",
             "Authorization": f"Bearer {self.api_key}",
         }
-
-        # Create persistent session with connection pooling
-        connector = aiohttp.TCPConnector(
-            limit=20,  # Maximum number of connections
-            limit_per_host=10,  # Maximum connections per host
-            ttl_dns_cache=300,  # DNS cache TTL
-            use_dns_cache=True,
-            keepalive_timeout=30,
-            enable_cleanup_closed=True,
-        )
-
-        timeout_config = aiohttp.ClientTimeout(
-            total=self.timeout, connect=5, sock_read=self.timeout - 5
-        )
-
-        self.session = aiohttp.ClientSession(
-            connector=connector, timeout=timeout_config, headers=self.headers
-        )
+        
+        # Session will be initialized in an async context
+        self.session = None
+        self._setup_done = False
 
         logger.debug(f"Initialized JinaReranker with model: {self.model}")
 
@@ -113,6 +99,9 @@ class JinaReranker:
         if not results:
             logger.info("No results to rerank")
             return []
+            
+        # Initialize session if not already done
+        await self._ensure_session()
 
         try:
             start_time = time.time()
@@ -263,6 +252,29 @@ class JinaReranker:
         except asyncio.TimeoutError as e:
             logger.error(f"Reranker API timeout after {time.time() - start_time:.2f}s")
             raise RerankerServiceUnavailable("Request timeout") from e
+
+    async def _ensure_session(self) -> None:
+        """Initialize aiohttp session if not already done."""
+        if self.session is None or self.session.closed:
+            # Create persistent session with connection pooling
+            connector = aiohttp.TCPConnector(
+                limit=20,  # Maximum number of connections
+                limit_per_host=10,  # Maximum connections per host
+                ttl_dns_cache=300,  # DNS cache TTL
+                use_dns_cache=True,
+                keepalive_timeout=30,
+                enable_cleanup_closed=True,
+            )
+
+            timeout_config = aiohttp.ClientTimeout(
+                total=self.timeout, connect=5, sock_read=self.timeout - 5
+            )
+
+            self.session = aiohttp.ClientSession(
+                connector=connector, timeout=timeout_config, headers=self.headers
+            )
+            self._setup_done = True
+            logger.debug("Created new aiohttp ClientSession")
 
     async def close(self) -> None:
         """Clean up resources."""

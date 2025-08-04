@@ -63,8 +63,8 @@ class HybridRetriever:
         self.repo_data = []
         self.repo_corpus = []
 
-        self._bm25_variant = bm25_variant.lower()
-        self.merge_strategy = merge_strategy.lower()
+        self._bm25_variant = bm25_variant.lower() if isinstance(bm25_variant, str) else "plus"
+        self.merge_strategy = merge_strategy.lower() if isinstance(merge_strategy, str) else "rrf"
         self.rrf_k = rrf_k
 
         logger.debug("Initializing HybridRetriever")
@@ -153,14 +153,20 @@ class HybridRetriever:
         Returns:
             List of repository results sorted by combined score
         """
+        logger.info(f"Searching for: '{query}' with limit={limit}")
+        
         vector_results = await self._vector_search(
             query, limit=limit * 2, filter_tags=filter_tags
         )
+        logger.info(f"Vector search returned {len(vector_results)} results")
+        
         bm25_results = await self._bm25_search(query, limit=limit * 2)
-
+        logger.info(f"BM25 search returned {len(bm25_results)} results")
+        
         # Combine results
         combined_results = self._combine_results(vector_results, bm25_results, limit)
-
+        logger.info(f"Combined results: {len(combined_results)} items")
+        
         return combined_results
 
     async def _vector_search(
@@ -180,11 +186,20 @@ class HybridRetriever:
             List of search results with scores
         """
         try:
+            # Здесь запрос пользователя целиком векторизуется через Jina API
+            # и затем используется для поиска похожих репозиториев в Qdrant
             results = await self.qdrant_store.search(
-                query=query,
+                query=query,  # Текстовый запрос передается в search, где он будет векторизован
                 limit=limit,
                 filter_tags=filter_tags,
             )
+            
+            # Логирование для диагностики
+            if not results:
+                logger.warning(f"Vector search returned no results for query: '{query}'")
+            else:
+                logger.debug(f"Vector search scores: {[r.get('score', 0) for r in results[:3]]}")
+                
             return results
         except Exception as e:
             logger.error(f"Error in vector search: {e}")
@@ -205,32 +220,34 @@ class HybridRetriever:
             return []
 
         try:
-            # Tokenize query
-            query_tokens = query.lower().split()
-
-            # Get BM25 scores
-            bm25_scores = self.bm25_index.get_scores(query_tokens)
-
-            # Get top indices
-            top_indices = np.argsort(bm25_scores)[::-1][:limit]
-
-            # Prepare results
+            # Улучшенная токенизация запроса
+            import re
+            query_tokens = [token.lower() for token in re.findall(r'\w+', query)]
+            
+            # Добавить поиск по отдельным словам запроса
+            all_scores = np.zeros(len(self.repo_data))
+            for token in query_tokens:
+                token_scores = self.bm25_index.get_scores([token])
+                all_scores += token_scores
+            
+            # Получить топ индексы
+            top_indices = np.argsort(all_scores)[::-1][:limit]
+            
+            # Подготовить результаты
             results = []
             for idx in top_indices:
-                if idx < len(self.repo_data):
+                if idx < len(self.repo_data) and all_scores[idx] > 0:
                     repo = self.repo_data[idx]
-                    results.append(
-                        {
-                            "repo_name": repo.get("full_name", ""),
-                            "repo_url": repo.get("html_url", ""),
-                            "summary": repo.get("description", ""),
-                            "tags": repo.get("tags", []),
-                            "language": repo.get("language"),
-                            "stars": repo.get("stargazers_count", 0),
-                            "score": float(bm25_scores[idx]),
-                        }
-                    )
-
+                    results.append({
+                        "repo_name": repo.get("full_name", ""),
+                        "repo_url": repo.get("html_url", ""),
+                        "summary": repo.get("description", ""),
+                        "tags": repo.get("tags", []),
+                        "language": repo.get("language"),
+                        "stars": repo.get("stargazers_count", 0),
+                        "score": float(all_scores[idx]),
+                    })
+            
             return results
 
         except Exception as e:
@@ -253,6 +270,14 @@ class HybridRetriever:
         Returns:
             Combined and ranked results
         """
+        # Если один из методов не дал результатов, используем результаты другого
+        if not vector_results and bm25_results:
+            return bm25_results[:limit]
+        if not bm25_results and vector_results:
+            return vector_results[:limit]
+        if not vector_results and not bm25_results:
+            return []
+            
         if self.merge_strategy == "rrf":
             # Apply Reciprocal Rank Fusion over individual ranked lists
             ranked_lists = [

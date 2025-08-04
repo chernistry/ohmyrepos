@@ -56,7 +56,7 @@ class ChatAdapter:
             provider_params = {
                 "base_url": base_url or (settings.llm.base_url if settings.llm else "https://api.openai.com/v1"),
                 "api_key": api_key or (settings.llm.api_key.get_secret_value() if settings.llm and settings.llm.api_key else None),
-                "model": model or (settings.llm.model if settings.llm else "gpt-4o-mini"),
+                "model": model or (settings.llm.model if settings.llm else "deepseek/deepseek-r1-0528:free"),
             }
         elif self.provider_name == "ollama":
             provider_params = {
@@ -72,7 +72,7 @@ class ChatAdapter:
         self.default_model = model or (
             settings.ollama.model
             if self.provider_name == "ollama"
-            else (settings.llm.model if settings.llm else "gpt-4o-mini")
+            else (settings.llm.model if settings.llm else "deepseek/deepseek-r1-0528:free")
         )
 
         logger.debug("Initialized ChatAdapter with provider=%s", self.provider_name)

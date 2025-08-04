@@ -34,7 +34,7 @@ def test_settings() -> Settings:
         ),
         llm=LLMConfig(
             provider="openai",
-            model="gpt-4o-mini",
+            model="deepseek/deepseek-r1-0528:free",
             api_key=SecretStr("test_key"),
         ),
         qdrant=QdrantConfig(

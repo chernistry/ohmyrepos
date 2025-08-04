@@ -21,11 +21,10 @@ from src.config import settings
 from src.core.logging import get_logger, log_exception, PerformanceLogger
 from src.core.retriever import HybridRetriever
 from src.core.reranker import JinaReranker
-from src.core.monitoring import get_metrics_collector
+from src.core.monitoring import metrics
 
 # Configure logging
 logger = get_logger(__name__)
-metrics = get_metrics_collector()
 
 # WCAG 2.2 AA compliant page configuration
 st.set_page_config(
@@ -48,10 +47,10 @@ def get_retriever() -> Optional[HybridRetriever]:
     try:
         with PerformanceLogger(logger, "retriever_initialization"):
             retriever = HybridRetriever(
-                bm25_variant=settings.search.bm25_variant.value,
+                bm25_variant=settings.search.bm25_variant,
                 bm25_weight=settings.search.bm25_weight,
                 vector_weight=settings.search.vector_weight,
-                merge_strategy=settings.search.rrf_k,
+                merge_strategy="rrf",
             )
 
             # Safe async initialization
@@ -61,12 +60,12 @@ def get_retriever() -> Optional[HybridRetriever]:
             asyncio.run(retriever.initialize())
             
             logger.info("Retriever initialized successfully")
-            metrics.increment("retriever_initialization_success")
+            metrics.record_api_request("retriever", "initialization", "success")
             return retriever
             
     except Exception as e:
         log_exception(logger, e, "Failed to initialize retriever")
-        metrics.increment("retriever_initialization_error")
+        metrics.record_api_request("retriever", "initialization", "error")
         st.error(
             "❌ Failed to initialize search engine. Please check your configuration.",
             icon="🚨"
@@ -83,14 +82,16 @@ def get_reranker() -> Optional[JinaReranker]:
                 logger.warning("Reranker not configured, search quality may be reduced")
                 return None
                 
+            # Initialize reranker but don't create aiohttp session yet
+            # The session will be created when needed in an async context
             reranker = JinaReranker()
             logger.info("Reranker initialized successfully")
-            metrics.increment("reranker_initialization_success")
+            metrics.record_api_request("reranker", "initialization", "success")
             return reranker
             
     except Exception as e:
         log_exception(logger, e, "Failed to initialize reranker")
-        metrics.increment("reranker_initialization_error")
+        metrics.record_api_request("reranker", "initialization", "error")
         st.warning(
             "⚠️ AI reranker unavailable. Basic search results will be provided.",
             icon="⚠️"
@@ -186,9 +187,9 @@ def search_repos_sync(
         search_duration = (time.time() - start_time) * 1000
         
         # Record metrics
-        metrics.increment("search_requests_total")
-        metrics.observe("search_duration_ms", search_duration)
-        metrics.observe("search_results_count", len(result.get("results", [])))
+        metrics.record_api_request("search", "query", "success")
+        metrics.record_request_duration("search", "query", search_duration / 1000)
+        # Record search results count (no direct method available)
         
         return {
             **result,
@@ -198,7 +199,7 @@ def search_repos_sync(
         
     except Exception as e:
         log_exception(logger, e, "Search operation failed", query=query)
-        metrics.increment("search_errors_total")
+        metrics.record_api_request("search", "query", "error")
         
         return {
             "results": [],
@@ -250,7 +251,7 @@ async def _search_repos(
 
     # Apply AI reranking if available and beneficial
     rerank_applied = False
-    if reranker and len(results) > 1:
+    if reranker and len(results) > 1 and enable_reranking:
         try:
             results = await reranker.rerank(
                 query, results, top_k=min(top_k, len(results))

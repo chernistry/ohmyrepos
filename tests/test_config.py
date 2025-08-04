@@ -55,7 +55,7 @@ class TestConfigurationModels:
         config = LLMConfig(
             provider=LLMProvider.OPENAI,
             api_key=SecretStr("sk-1234567890abcdef"),
-            model="gpt-4o-mini",
+            model="deepseek/deepseek-r1-0528:free",
         )
         assert config.provider == LLMProvider.OPENAI
         assert config.api_key.get_secret_value() == "sk-1234567890abcdef"

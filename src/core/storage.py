@@ -416,13 +416,58 @@ class QdrantStore(LoggerMixin):
         # Remove None values
         return {k: v for k, v in payload.items() if v is not None}
 
+    async def search(
+        self,
+        query: str,
+        limit: int = 25,
+        filter_tags: Optional[List[str]] = None,
+        score_threshold: float = 0.0,
+    ) -> List[Dict[str, Any]]:
+        """Perform semantic search using query text.
+        
+        Args:
+            query: Search query text
+            limit: Maximum number of results
+            filter_tags: Optional list of tags to filter by
+            score_threshold: Minimum similarity score
+            
+        Returns:
+            List of search results with scores
+        """
+        from src.core.embeddings.factory import EmbeddingFactory
+        
+        # Get API key from environment
+        api_key = os.getenv("EMBEDDING_MODEL_API_KEY")
+        if not api_key:
+            self.logger.error("EMBEDDING_MODEL_API_KEY environment variable is required for vector search")
+            return []
+            
+        # Create embedding provider
+        embedding_provider = EmbeddingFactory.get_provider(api_key=api_key)
+        
+        try:
+            # Generate embedding for query
+            self.logger.debug(f"Generating embedding for query: '{query}'")
+            query_vector = await embedding_provider.embed_query(query)
+            
+            # Perform vector search
+            return await self.vector_search(
+                query_vector=query_vector,
+                limit=limit,
+                filter_conditions={"tags": filter_tags} if filter_tags else None,
+                score_threshold=score_threshold
+            )
+        except Exception as e:
+            self.logger.error(f"Error in search: {e}")
+            return []
+    
     async def vector_search(
         self,
         query_vector: List[float],
         limit: int = 25,
         filter_conditions: Optional[Dict[str, Any]] = None,
         score_threshold: float = 0.0,
-    ) -> List[SearchResult]:
+    ) -> List[Dict[str, Any]]:
         """Perform vector similarity search.
 
         Args:
@@ -462,20 +507,21 @@ class QdrantStore(LoggerMixin):
                 score_threshold=score_threshold,
             )
 
-            # Convert to SearchResult objects
+            # Convert to dictionary results
             search_results = []
             for hit in results:
                 if hit.score >= score_threshold:
-                    result = SearchResult(
-                        repo_name=hit.payload.get("repo_name", ""),
-                        repo_url=hit.payload.get("repo_url", ""),
-                        summary=hit.payload.get("summary"),
-                        tags=hit.payload.get("tags", []),
-                        language=hit.payload.get("language"),
-                        stars=hit.payload.get("stars", 0),
-                        score=hit.score,
-                        vector_score=hit.score,
-                    )
+                    result = {
+                        "repo_name": hit.payload.get("repo_name", ""),
+                        "repo_url": hit.payload.get("repo_url", ""),
+                        "summary": hit.payload.get("summary"),
+                        "tags": hit.payload.get("tags", []),
+                        "language": hit.payload.get("language"),
+                        "stars": hit.payload.get("stars", 0),
+                        "score": float(hit.score),
+                        "vector_score": float(hit.score),
+                        "bm25_score": 0.0,  # Для совместимости с BM25 результатами
+                    }
                     search_results.append(result)
 
             # Update statistics
