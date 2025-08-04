@@ -119,8 +119,16 @@ class QdrantStore(LoggerMixin):
             if self.config.api_key:
                 client_kwargs["api_key"] = self.config.api_key.get_secret_value()
             
-            self._client = AsyncQdrantClient(**client_kwargs)
+            try:
+                self._client = AsyncQdrantClient(**client_kwargs)
+                self.logger.debug(f"Initialized Qdrant client with URL: {self.config.url}")
+            except Exception as client_error:
+                raise ConnectionError(f"Failed to create Qdrant client: {client_error}")
             
+            # Ensure client is properly initialized
+            if not self._client:
+                raise ConnectionError("Failed to initialize Qdrant client")
+                
             # Validate connection
             await self._validate_connection()
             
@@ -141,8 +149,15 @@ class QdrantStore(LoggerMixin):
     async def _validate_connection(self) -> None:
         """Validate Qdrant connection and permissions."""
         try:
+            # Ensure client is initialized before attempting connection
+            if not self._client:
+                raise ConnectionError("Qdrant client is not initialized")
+                
             # Test connection with a simple operation
             collections = await self._client.get_collections()
+            if not collections:
+                raise ConnectionError("Received empty response from Qdrant")
+                
             self.logger.debug(f"Found {len(collections.collections)} collections")
             
         except Exception as e:
@@ -160,9 +175,19 @@ class QdrantStore(LoggerMixin):
 
         try:
             with PerformanceLogger(self.logger, "setup_collection"):
+                # Verify client is initialized
+                if not self._client:
+                    raise StorageError("Cannot setup collection: Qdrant client is not initialized")
+                
                 # Check if collection exists
-                collections = await self._client.get_collections()
-                collection_names = [c.name for c in collections.collections]
+                try:
+                    collections = await self._client.get_collections()
+                    if not collections:
+                        raise StorageError("Failed to get collections from Qdrant")
+                    
+                    collection_names = [c.name for c in collections.collections]
+                except Exception as e:
+                    raise StorageError(f"Failed to list collections: {e}")
 
                 if self.collection_name not in collection_names:
                     self.logger.info(f"Creating collection: {self.collection_name}")
