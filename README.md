@@ -1,6 +1,6 @@
 # Oh My Repos
 
-**Enterprise-Grade Semantic Search for GitHub Repository Collections**
+**Semantic Search for GitHub Repository Collections**
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-UI-red.svg)](https://streamlit.io/)
@@ -35,15 +35,15 @@
 
 ## Executive Summary
 
-Oh My Repos addresses the scalability challenge of managing large GitHub repository collections through advanced semantic search capabilities. The system implements a hybrid retrieval architecture that combines lexical matching with dense vector similarity, enhanced by large language model-powered analysis and reranking.
+Oh My Repos is a tool for managing and searching large GitHub repository collections using semantic and lexical search. It implements a hybrid retrieval architecture that combines lexical matching with dense vector similarity, with optional LLM-powered analysis and reranking.
 
-### Core Technical Advantages
+### Technical Overview
 
-- **Hybrid Search Architecture**: Integrates BM25 lexical search with dense vector similarity using Reciprocal Rank Fusion
-- **Asynchronous Processing**: Concurrent execution with proper backpressure control and rate limiting mechanisms
-- **LLM Integration**: Automated repository analysis with summarization and intelligent categorization
-- **Production Engineering**: Comprehensive error handling, observability, and performance optimization
-- **Multi-Modal Interface**: Command-line tooling and web-based interactive dashboard
+- **Hybrid Search Architecture**: Combines BM25 lexical search with dense vector similarity using Reciprocal Rank Fusion
+- **Asynchronous Processing**: Concurrent execution with backpressure control and rate limiting
+- **LLM Integration**: Automated repository analysis with summarization and categorization (optional)
+- **Production Engineering**: Error handling, observability, and performance optimization
+- **Multi-Modal Interface**: Command-line tooling and web-based dashboard
 
 ---
 
