@@ -8,15 +8,9 @@ import json
 import logging
 from typing import Dict, Optional, Any, Union, AsyncGenerator
 
-# Fix imports for compatibility
-try:
-    from src.llm.chat_adapter import ChatAdapter
-    from src.llm.prompt_builder import PromptBuilder
-    from src.llm.reply_extractor import extract_json_dict_sync
-except ImportError:
-    from llm.chat_adapter import ChatAdapter
-    from llm.prompt_builder import PromptBuilder
-    from llm.reply_extractor import extract_json_dict_sync
+from src.llm.chat_adapter import ChatAdapter
+from src.llm.prompt_builder import PromptBuilder
+from src.llm.reply_extractor import extract_json_dict_sync
 
 logger = logging.getLogger(__name__)
 

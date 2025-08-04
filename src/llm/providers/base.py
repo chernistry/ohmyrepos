@@ -20,7 +20,7 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     """Strongly typed chat completion request."""
 
-    messages: List[ChatMessage] = Field(..., min_items=1)
+    messages: List[ChatMessage] = Field(..., min_length=1)
     model: str = Field(..., min_length=1)
     temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     max_tokens: int = Field(default=1000, ge=1, le=32000)
@@ -54,7 +54,7 @@ class ChatCompletionResponse(BaseModel):
     object: str = Field(default="chat.completion")
     created: int = Field(...)
     model: str = Field(...)
-    choices: List[ChatCompletionChoice] = Field(..., min_items=1)
+    choices: List[ChatCompletionChoice] = Field(..., min_length=1)
     usage: Optional[ChatCompletionUsage] = Field(default=None)
 
 
@@ -73,7 +73,7 @@ class StreamingChunk(BaseModel):
     object: str = Field(default="chat.completion.chunk")
     created: int = Field(...)
     model: str = Field(...)
-    choices: List[StreamingChoice] = Field(..., min_items=1)
+    choices: List[StreamingChoice] = Field(..., min_length=1)
 
 
 class LLMError(Exception):

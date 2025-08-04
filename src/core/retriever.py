@@ -13,13 +13,8 @@ from rank_bm25 import BM25Okapi
 from rank_bm25 import BM25Plus
 import numpy as np
 
-# Fix imports for compatibility
-try:
-    from ..config import settings
-    from ..core.storage import QdrantStore
-except ImportError:
-    from src.config import settings
-    from src.core.storage import QdrantStore
+from src.config import settings
+from src.core.storage import QdrantStore
 
 logger = logging.getLogger(__name__)
 

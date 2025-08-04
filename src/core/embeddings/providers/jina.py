@@ -15,13 +15,8 @@ from tenacity import (
     retry_if_exception_type,
 )
 
-# Исправляем импорты для совместимости
-try:
-    from src.config import settings
-    from src.core.embeddings.base import EmbeddingProvider, EmbeddingConfig
-except ImportError:
-    from config import settings
-    from core.embeddings.base import EmbeddingProvider, EmbeddingConfig
+from src.config import settings
+from src.core.embeddings.base import EmbeddingProvider, EmbeddingConfig
 
 logger = logging.getLogger(__name__)
 

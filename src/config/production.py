@@ -8,7 +8,7 @@ import os
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, List
-from pydantic import Field, validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 try:
@@ -155,7 +155,8 @@ class ProductionSettings(BaseSettings):
         case_sensitive=True,
     )
 
-    @validator("LOG_LEVEL")
+    @field_validator("LOG_LEVEL")
+    @classmethod
     def validate_log_level(cls, v):
         """Validate log level."""
         valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -163,7 +164,8 @@ class ProductionSettings(BaseSettings):
             raise ValueError(f"Invalid log level. Must be one of: {valid_levels}")
         return v.upper()
 
-    @validator("SECRETS_BACKEND")
+    @field_validator("SECRETS_BACKEND")
+    @classmethod
     def validate_secrets_backend(cls, v):
         """Validate secrets backend."""
         valid_backends = ["env", "keyring", "aws"]
@@ -173,7 +175,8 @@ class ProductionSettings(BaseSettings):
             )
         return v
 
-    @validator("BM25_WEIGHT", "VECTOR_WEIGHT")
+    @field_validator("BM25_WEIGHT", "VECTOR_WEIGHT")
+    @classmethod
     def validate_weights(cls, v):
         """Validate weight values."""
         if not 0.0 <= v <= 1.0:

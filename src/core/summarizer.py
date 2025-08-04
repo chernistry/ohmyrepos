@@ -10,13 +10,8 @@ import os
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple, Callable
 
-# Fix imports for compatibility
-try:
-    from src.llm.generator import LLMGenerator
-    from src.llm.prompt_builder import PromptBuilder
-except ImportError:
-    from llm.generator import LLMGenerator
-    from llm.prompt_builder import PromptBuilder
+from src.llm.generator import LLMGenerator
+from src.llm.prompt_builder import PromptBuilder
 
 logger = logging.getLogger(__name__)
 

@@ -15,15 +15,9 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
 
-# Fix imports for compatibility
-try:
-    from src.core.collector import RepoCollector
-    from src.core.storage import QdrantStore
-    from src.core.summarizer import RepoSummarizer
-except ImportError:
-    from core.collector import RepoCollector
-    from core.storage import QdrantStore
-    from core.summarizer import RepoSummarizer
+from src.core.collector import RepoCollector
+from src.core.storage import QdrantStore
+from src.core.summarizer import RepoSummarizer
 
 # Configure logging
 logging.basicConfig(

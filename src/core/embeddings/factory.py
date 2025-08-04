@@ -6,15 +6,9 @@ This module provides a factory for creating embedding providers.
 import logging
 from typing import Dict, Type, Optional
 
-# Исправляем импорты для совместимости
-try:
-    from src.config import settings
-    from src.core.embeddings.base import EmbeddingProvider, EmbeddingConfig
-    from src.core.embeddings.providers.jina import JinaEmbeddingProvider
-except ImportError:
-    from config import settings
-    from core.embeddings.base import EmbeddingProvider, EmbeddingConfig
-    from core.embeddings.providers.jina import JinaEmbeddingProvider
+from src.config import settings
+from src.core.embeddings.base import EmbeddingProvider, EmbeddingConfig
+from src.core.embeddings.providers.jina import JinaEmbeddingProvider
 
 logger = logging.getLogger(__name__)
 

@@ -34,12 +34,8 @@ def get_provider(name: str, **kwargs: Any) -> BaseLLMProvider:
     """
     if name not in _PROVIDERS:
         # Import built-in providers
-        try:
-            from src.llm.providers import openai  # noqa: F401
-            from src.llm.providers import ollama  # noqa: F401
-        except ImportError:
-            from llm.providers import openai  # noqa: F401
-            from llm.providers import ollama  # noqa: F401
+        from src.llm.providers import openai  # noqa: F401
+        from src.llm.providers import ollama  # noqa: F401
 
         # Check again after imports
         if name not in _PROVIDERS:

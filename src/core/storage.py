@@ -17,14 +17,9 @@ from tenacity import (
     retry_if_exception_type,
 )
 
-try:
-    from ..config import QdrantConfig, settings
-    from ..core.logging import LoggerMixin, PerformanceLogger, log_exception
-    from ..core.models import RepositoryData, SearchResult
-except ImportError:
-    from src.config import QdrantConfig, settings
-    from src.core.logging import LoggerMixin, PerformanceLogger, log_exception
-    from src.core.models import RepositoryData, SearchResult
+from src.config import QdrantConfig, settings
+from src.core.logging import LoggerMixin, PerformanceLogger, log_exception
+from src.core.models import RepositoryData, SearchResult
 
 
 class StorageError(Exception):

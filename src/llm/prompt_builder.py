@@ -7,11 +7,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-# Fix imports for compatibility
-try:
-    from src.config import settings
-except ImportError:
-    from config import settings
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 

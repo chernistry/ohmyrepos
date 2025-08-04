@@ -18,11 +18,7 @@ from tenacity import (
     retry_if_exception_type,
 )
 
-# Fix imports for compatibility
-try:
-    from src.config import settings
-except ImportError:
-    from config import settings
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
