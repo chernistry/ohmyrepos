@@ -6,7 +6,7 @@ with comprehensive validation and type safety.
 
 from typing import List, Optional, Dict, Any, Union
 from enum import Enum
-from pydantic import BaseModel, Field, validator, root_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 import re
 
 
@@ -43,7 +43,8 @@ class EmbeddingRequest(BaseModel):
     texts: List[str] = Field(..., min_items=1, max_items=100)
     model: EmbeddingModel = Field(default=EmbeddingModel.JINA_V3)
 
-    @validator("texts")
+    @field_validator("texts")
+    @classmethod
     def validate_texts(cls, v):
         """Validate text inputs."""
         for i, text in enumerate(v):
@@ -69,14 +70,15 @@ class EmbeddingResponse(BaseModel):
     model: str = Field(...)
     dimension: int = Field(..., gt=0)
 
-    @validator("embeddings")
-    def validate_embeddings(cls, v, values):
+    @field_validator("embeddings")
+    @classmethod
+    def validate_embeddings(cls, v, info):
         """Validate embedding vectors."""
         if not v:
             raise ValueError("At least one embedding is required")
 
         # Check dimension consistency
-        expected_dim = values.get("dimension")
+        expected_dim = info.data.get("dimension") if info.data else None
         if expected_dim:
             for i, embedding in enumerate(v):
                 if len(embedding) != expected_dim:
@@ -96,14 +98,16 @@ class RerankerRequest(BaseModel):
     model: RerankerModel = Field(default=RerankerModel.JINA_M0)
     top_n: int = Field(default=25, ge=1, le=1000)
 
-    @validator("query")
+    @field_validator("query")
+    @classmethod
     def validate_query(cls, v):
         """Validate query string."""
         if not v.strip():
             raise ValueError("Query cannot be empty")
         return v.strip()
 
-    @validator("documents")
+    @field_validator("documents")
+    @classmethod
     def validate_documents(cls, v):
         """Validate document list."""
         for i, doc in enumerate(v):
@@ -120,7 +124,8 @@ class RerankerResponse(BaseModel):
     results: List[Dict[str, Union[int, float]]] = Field(...)
     model: str = Field(...)
 
-    @validator("results")
+    @field_validator("results")
+    @classmethod
     def validate_results(cls, v):
         """Validate reranking results."""
         for i, result in enumerate(v):
@@ -149,7 +154,8 @@ class SearchRequest(BaseModel):
     bm25_variant: BM25Variant = Field(default=BM25Variant.PLUS)
     merge_strategy: MergeStrategy = Field(default=MergeStrategy.RRF)
 
-    @validator("query")
+    @field_validator("query")
+    @classmethod
     def validate_query(cls, v):
         """Validate search query."""
         # Remove extra whitespace
@@ -173,7 +179,8 @@ class SearchRequest(BaseModel):
 
         return query
 
-    @validator("filter_tags")
+    @field_validator("filter_tags")
+    @classmethod
     def validate_filter_tags(cls, v):
         """Validate filter tags."""
         if v is None:
@@ -192,16 +199,13 @@ class SearchRequest(BaseModel):
         # Remove duplicates while preserving order
         return list(dict.fromkeys(v))
 
-    @root_validator
-    def validate_weights(cls, values):
+    @model_validator(mode="after")
+    def validate_weights(self) -> "SearchRequest":
         """Validate that weights sum to approximately 1.0."""
-        bm25_weight = values.get("bm25_weight", 0.4)
-        vector_weight = values.get("vector_weight", 0.6)
-
-        if abs(bm25_weight + vector_weight - 1.0) > 0.01:
+        if abs(self.bm25_weight + self.vector_weight - 1.0) > 0.01:
             raise ValueError("BM25 and vector weights must sum to 1.0")
 
-        return values
+        return self
 
 
 class RepositoryData(BaseModel):
@@ -218,7 +222,8 @@ class RepositoryData(BaseModel):
     created_at: Optional[str] = Field(None)
     updated_at: Optional[str] = Field(None)
 
-    @validator("repo_url")
+    @field_validator("repo_url")
+    @classmethod
     def validate_repo_url(cls, v):
         """Validate repository URL."""
         url_pattern = re.compile(
@@ -236,7 +241,8 @@ class RepositoryData(BaseModel):
 
         return v
 
-    @validator("tags")
+    @field_validator("tags")
+    @classmethod
     def validate_tags(cls, v):
         """Validate repository tags."""
         if not v:
@@ -273,7 +279,7 @@ class SearchResult(BaseModel):
 class HealthCheckResult(BaseModel):
     """Model for health check results."""
 
-    status: str = Field(..., regex=r"^(healthy|unhealthy)$")
+    status: str = Field(..., pattern=r"^(healthy|unhealthy)$")
     checks: Dict[str, Dict[str, Any]] = Field(...)
     timestamp: float = Field(..., gt=0)
 
@@ -289,27 +295,22 @@ class BatchProcessingStatus(BaseModel):
     end_time: Optional[float] = Field(None)
     errors: List[str] = Field(default_factory=list)
 
-    @root_validator
-    def validate_processing_status(cls, values):
+    @model_validator(mode="after")
+    def validate_processing_status(self) -> "BatchProcessingStatus":
         """Validate processing status consistency."""
-        total = values.get("total_items", 0)
-        processed = values.get("processed_items", 0)
-        failed = values.get("failed_items", 0)
-
-        if processed > total:
+        if self.processed_items > self.total_items:
             raise ValueError("Processed items cannot exceed total items")
 
-        if failed > processed:
+        if self.failed_items > self.processed_items:
             raise ValueError("Failed items cannot exceed processed items")
 
         # Calculate success rate
-        if processed > 0:
-            success_rate = (processed - failed) / processed
-            values["success_rate"] = success_rate
+        if self.processed_items > 0:
+            self.success_rate = (self.processed_items - self.failed_items) / self.processed_items
         else:
-            values["success_rate"] = 0.0
+            self.success_rate = 0.0
 
-        return values
+        return self
 
 
 class ConfigurationError(Exception):

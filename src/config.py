@@ -73,6 +73,14 @@ class GitHubConfig(BaseModel):
             raise ValueError("Invalid GitHub username format")
         return v.lower()
 
+    @field_validator("token")
+    @classmethod
+    def validate_token(cls, v: SecretStr) -> SecretStr:
+        """Validate GitHub token is not empty."""
+        if not v.get_secret_value().strip():
+            raise ValueError("GitHub token cannot be empty")
+        return v
+
 
 class LLMConfig(BaseModel):
     """LLM provider configuration."""
