@@ -36,7 +36,7 @@ pytest-mock
 pytest-cov
 black
 ruff
-httpx-mock
+httpx
 
 # Type checking
 mypy
