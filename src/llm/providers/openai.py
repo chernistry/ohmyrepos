@@ -66,7 +66,7 @@ class OpenAIProvider(BaseLLMProvider):
         """
         super().__init__(**kwargs)
         self.api_key = api_key
-        self.base_url = base_url.rstrip("/")
+        self.base_url = str(base_url).rstrip("/")
         self.timeout = timeout
         self.max_retries = max_retries
         self.max_concurrent = max_concurrent

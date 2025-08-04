@@ -63,7 +63,7 @@ class OllamaProvider(BaseLLMProvider):
             **kwargs: Additional configuration
         """
         super().__init__(**kwargs)
-        self.base_url = base_url.rstrip("/")
+        self.base_url = str(base_url).rstrip("/")
         self.timeout = timeout
         self.keep_alive = keep_alive
         self.num_ctx = num_ctx
