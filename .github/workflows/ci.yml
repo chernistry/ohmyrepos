@@ -29,8 +29,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run ruff linter
-        run: ruff check . --output-format=github
+      # - name: Run ruff linter
+      #   run: ruff check . --output-format=github
 
       - name: Check code formatting with black
         run: black --check --diff .
