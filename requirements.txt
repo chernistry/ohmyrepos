@@ -1,21 +1,43 @@
-colorama
-halo
-httpx
-json5
-pydantic
-pydantic_settings
-rich
-tenacity
-typer
-qdrant-client
-numpy
-pandas
-pytest
-pytest-asyncio
-black
-ruff
-python-dotenv
-streamlit
-rank_bm25
-aiohttp
-nest_asyncio
+# Core dependencies with version pinning
+colorama==0.4.6
+halo==0.0.31
+httpx[http2]==0.25.2
+json5==0.9.14
+pydantic==2.5.3
+pydantic-settings==2.1.0
+rich==13.7.0
+tenacity==8.2.3
+typer==0.9.0
+qdrant-client==1.7.0
+numpy==1.26.2
+pandas==2.1.4
+python-dotenv==1.0.0
+streamlit==1.29.0
+rank-bm25==0.2.2
+aiohttp==3.9.1
+nest-asyncio==1.5.8
+
+# Security and secrets management
+cryptography==41.0.8
+keyring==24.3.0
+
+# Performance optimizations
+uvloop==0.19.0; sys_platform != "win32"
+orjson==3.9.10
+
+# Observability and monitoring
+prometheus-client==0.19.0
+structlog==23.2.0
+
+# Development and testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-mock==3.12.0
+pytest-cov==4.1.0
+black==23.12.0
+ruff==0.1.8
+httpx-mock==0.13.0
+
+# Type checking
+mypy==1.7.1
+types-aiofiles==23.2.0.0

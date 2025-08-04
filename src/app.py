@@ -8,7 +8,6 @@ import logging
 import streamlit as st
 import pandas as pd
 import sys
-import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
@@ -35,6 +34,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
 # Global state for retriever and reranker
 @st.cache_resource
 def get_retriever():
@@ -44,25 +44,29 @@ def get_retriever():
         bm25_weight=settings.BM25_WEIGHT,
         vector_weight=settings.VECTOR_WEIGHT,
     )
-    
+
     # Инициализируем retriever синхронно
     # Используем nest_asyncio для решения проблемы с вложенными циклами событий
     import nest_asyncio
+
     nest_asyncio.apply()
-    
+
     # Теперь можно безопасно запустить асинхронный код
     asyncio.run(retriever.initialize())
     return retriever
+
 
 @st.cache_resource
 def get_reranker():
     """Initialize and return the reranker."""
     return JinaReranker()
 
+
 # Helper functions
 def make_clickable(url, text):
     """Make a clickable link for Streamlit dataframe."""
     return f'<a href="{url}" target="_blank">{text}</a>'
+
 
 def search_repos_sync(
     query: str,
@@ -80,10 +84,12 @@ def search_repos_sync(
     """
     # Use nest_asyncio to solve nested event loop issues
     import nest_asyncio
+
     nest_asyncio.apply()
 
     # Run the asynchronous search
     return asyncio.run(_search_repos(query, top_k, filter_tags, filter_language))
+
 
 async def _search_repos(
     query: str,
@@ -113,29 +119,40 @@ async def _search_repos(
 
     return results
 
+
 # UI Components
 def render_header():
     """Render the application header."""
     st.title("🔍 Oh My Repos")
-    st.markdown("""
+    st.markdown(
+        """
     Search through your starred GitHub repositories using semantic search and hybrid retrieval.
-    """)
+    """
+    )
+
 
 def render_search_form():
     """Render the search form, including new filters."""
     with st.form("search_form"):
-        query = st.text_input("Search Query", placeholder="Enter your search query here...")
+        query = st.text_input(
+            "Search Query", placeholder="Enter your search query here..."
+        )
         col1, col2 = st.columns([3, 1])
         with col1:
-            top_k = st.slider("Number of results", min_value=5, max_value=50, value=25, step=5)
+            top_k = st.slider(
+                "Number of results", min_value=5, max_value=50, value=25, step=5
+            )
         with col2:
             search_button = st.form_submit_button("Search")
 
         # New controls
-        language_filter = st.text_input("Filter by Language (optional)", placeholder="Python")
+        language_filter = st.text_input(
+            "Filter by Language (optional)", placeholder="Python"
+        )
         sort_by_stars = st.checkbox("Sort by Stars (descending)", value=False)
 
     return query, top_k, language_filter, sort_by_stars, search_button
+
 
 def render_results(results: List[Dict[str, Any]], sort_by_stars: bool = False):
     """Render search results with optional sorting."""
@@ -148,25 +165,39 @@ def render_results(results: List[Dict[str, Any]], sort_by_stars: bool = False):
 
     # Convert results to DataFrame for display
     df = pd.DataFrame(results)
-    
+
     # Select and rename columns for display
     display_columns = [
-        "repo_name", "repo_url", "summary", "language", "stars", 
-        "score", "vector_score", "bm25_score"
+        "repo_name",
+        "repo_url",
+        "summary",
+        "language",
+        "stars",
+        "score",
+        "vector_score",
+        "bm25_score",
     ]
-    
+
     # Filter to only include columns that exist
     display_columns = [col for col in display_columns if col in df.columns]
-    
+
     # Create a new DataFrame with selected columns
     display_df = df[display_columns].copy()
-    
+
     # Format scores to 3 decimal places
-    score_columns = ["score", "vector_score", "bm25_score", "rerank_score", "original_score"]
+    score_columns = [
+        "score",
+        "vector_score",
+        "bm25_score",
+        "rerank_score",
+        "original_score",
+    ]
     for col in score_columns:
         if col in display_df.columns:
-            display_df[col] = display_df[col].apply(lambda x: f"{x:.3f}" if pd.notnull(x) else "")
-    
+            display_df[col] = display_df[col].apply(
+                lambda x: f"{x:.3f}" if pd.notnull(x) else ""
+            )
+
     # Rename columns for display
     column_map = {
         "repo_name": "Repository",
@@ -178,10 +209,13 @@ def render_results(results: List[Dict[str, Any]], sort_by_stars: bool = False):
         "vector_score": "Vector Score",
         "bm25_score": "BM25 Score",
         "rerank_score": "Rerank Score",
-        "original_score": "Original Score"
+        "original_score": "Original Score",
     }
-    display_df.rename(columns={k: v for k, v in column_map.items() if k in display_df.columns}, inplace=True)
-    
+    display_df.rename(
+        columns={k: v for k, v in column_map.items() if k in display_df.columns},
+        inplace=True,
+    )
+
     # Make repository names clickable
     if "Repository" in display_df.columns and "URL" in display_df.columns:
         display_df["Repository"] = display_df.apply(
@@ -189,14 +223,15 @@ def render_results(results: List[Dict[str, Any]], sort_by_stars: bool = False):
         )
         # Remove URL column as it's now embedded in Repository
         display_df.drop(columns=["URL"], inplace=True)
-    
+
     # Display results
     st.markdown("### Search Results")
     st.write(display_df.to_html(escape=False), unsafe_allow_html=True)
-    
+
     # Show raw JSON for debugging if requested
     with st.expander("Show raw results data"):
         st.json(results)
+
 
 def main():
     """Main application entry point."""
@@ -211,6 +246,7 @@ def main():
             render_results(results, sort_by_stars)
     elif search_button and not query:
         st.warning("Please enter a search query.")
+
 
 if __name__ == "__main__":
     main()
