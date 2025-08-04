@@ -979,29 +979,33 @@ def search(
     from src.core.retriever import HybridRetriever
     from src.core.reranker import JinaReranker
 
-    try:
+    async def search_async():
         # Initialize retriever and reranker
-        console.print(f"Searching for: [bold]{query}[/bold]")
-
-        with console.status("[bold green]Initializing retriever..."):
-            retriever = HybridRetriever()
-            asyncio.run(retriever.initialize())
-
-        # Initialize reranker
+        repos_path = Path(__file__).parent.parent / "repos.json"
+        retriever = HybridRetriever(repos_json_path=str(repos_path))
+        await retriever.initialize()
+        
         reranker = JinaReranker()
-
-        # Perform search
-        with console.status("[bold green]Searching repositories..."):
+        
+        try:
             # Search with retriever
-            results = asyncio.run(
-                retriever.search(query, limit=limit * 2, filter_tags=filter_tags)
-            )
+            results = await retriever.search(query, limit=limit * 2, filter_tags=filter_tags)
             console.print(f"Found [bold]{len(results)}[/bold] initial results")
-
+            
             # Rerank if we have more than 1 result
             if len(results) > 1:
-                with console.status("[bold green]Reranking results..."):
-                    results = asyncio.run(reranker.rerank(query, results, top_k=limit))
+                results = await reranker.rerank(query, results, top_k=limit)
+            
+            return results
+        finally:
+            await retriever.close()
+            await reranker.close()
+    
+    try:
+        console.print(f"Searching for: [bold]{query}[/bold]")
+        
+        with console.status("[bold green]Searching repositories..."):
+            results = asyncio.run(search_async())
 
         # Output results
         if output_file:
@@ -1024,10 +1028,6 @@ def search(
 
                 if "tags" in result and result["tags"]:
                     console.print(f"Tags: {', '.join(result['tags'])}")
-
-        # Clean up
-        asyncio.run(retriever.close())
-        asyncio.run(reranker.close())
 
     except Exception as e:
         logger.error(f"Error: {e}")
