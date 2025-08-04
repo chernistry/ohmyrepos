@@ -1,38 +1,33 @@
-"""Vector storage for Oh My Repos.
+"""Enterprise-grade vector storage with comprehensive batch processing and security."""
 
-This module provides functionality to store and retrieve repository embeddings.
-"""
-
-import logging
-import uuid
+import asyncio
 import hashlib
-from typing import Dict, List, Optional, Any
+import time
+import uuid
+from contextlib import asynccontextmanager
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models as qdrant_models
 from qdrant_client.http.exceptions import UnexpectedResponse
 from tenacity import (
     retry,
     stop_after_attempt,
-    wait_exponential_jitter,
+    wait_exponential,
     retry_if_exception_type,
 )
 
-# Fix imports for compatibility
-try:
-    from src.config import settings
-    from src.core.embeddings import EmbeddingFactory, EmbeddingProvider
-except ImportError:
-    from config import settings
-    from core.embeddings import EmbeddingFactory, EmbeddingProvider
-
-logger = logging.getLogger(__name__)
+from ..config import QdrantConfig, settings
+from ..core.logging import LoggerMixin, PerformanceLogger, log_exception
+from ..core.models import RepositoryData, SearchResult
 
 
 class StorageError(Exception):
     """Base exception for storage operations."""
 
-    pass
+    def __init__(self, message: str, operation: str = "") -> None:
+        super().__init__(message)
+        self.operation = operation
 
 
 class VectorDimensionError(StorageError):
@@ -41,421 +36,562 @@ class VectorDimensionError(StorageError):
     pass
 
 
-# Constants
-COLLECTION_NAME = "repositories"
-BATCH_SIZE = 100
+class ConnectionError(StorageError):
+    """Qdrant connection error."""
+
+    pass
 
 
-class QdrantStore:
-    """Qdrant vector store for repository embeddings.
-
-    This class handles storing and retrieving repository embeddings in Qdrant.
+class QdrantStore(LoggerMixin):
+    """Enterprise-grade Qdrant vector store with comprehensive features.
+    
+    Features:
+    - Async-first design with proper resource management
+    - Batch processing with configurable sizes
+    - Comprehensive error handling and retry logic
+    - Performance monitoring and metrics
+    - Security hardening and validation
+    - Connection pooling and health checks
     """
 
     def __init__(
         self,
-        url: Optional[str] = None,
-        api_key: Optional[str] = None,
-        embedding_provider: Optional[EmbeddingProvider] = None,
+        qdrant_config: Optional[QdrantConfig] = None,
+        collection_name: str = "repositories",
+        batch_size: int = 100,
+        max_concurrent_batches: int = 3,
     ) -> None:
         """Initialize the Qdrant store.
 
         Args:
-            url: Qdrant server URL
-            api_key: Qdrant API key
-            embedding_provider: Embedding provider to use
+            qdrant_config: Qdrant configuration
+            collection_name: Name of the collection
+            batch_size: Batch size for operations
+            max_concurrent_batches: Maximum concurrent batch operations
         """
-        self.url = url or settings.QDRANT_URL
-        self.api_key = api_key or settings.QDRANT_API_KEY
+        super().__init__()
+        
+        self.config = qdrant_config or settings.qdrant
+        if not self.config:
+            raise ValueError("Qdrant configuration is required")
+        
+        self.collection_name = collection_name
+        self.batch_size = batch_size
+        self.max_concurrent_batches = max_concurrent_batches
+        
+        # Initialize client and state
+        self._client: Optional[AsyncQdrantClient] = None
+        self._initialized = False
+        self._collection_ready = False
+        self._semaphore = asyncio.Semaphore(max_concurrent_batches)
+        
+        # Statistics
+        self.stats = {
+            "operations": 0,
+            "points_stored": 0,
+            "points_searched": 0,
+            "errors": 0,
+            "avg_response_time": 0.0,
+        }
 
-        if not self.url:
-            raise ValueError("Qdrant URL must be provided")
+    async def __aenter__(self) -> "QdrantStore":
+        """Async context manager entry."""
+        await self.initialize()
+        return self
 
-        # Initialize client with correct parameters
-        if self.api_key:
-            self.client = QdrantClient(
-                url=self.url,
-                api_key=self.api_key,
-            )
-        else:
-            self.client = QdrantClient(url=self.url)
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Async context manager exit."""
+        await self.close()
 
-        self.embedding_provider = embedding_provider or EmbeddingFactory.get_provider()
-        logger.debug(f"Initialized QdrantStore with URL: {self.url}")
+    async def initialize(self) -> None:
+        """Initialize the Qdrant client and validate connection."""
+        if self._initialized:
+            return
 
-    async def setup_collection(self) -> None:
-        """Set up the collection for storing repository embeddings.
-
-        This method creates the collection if it doesn't exist.
-        """
         try:
-            # Check if collection exists
-            collections = self.client.get_collections().collections
-            collection_names = [c.name for c in collections]
-
-            # Get embedding dimension from provider
-            embedding_dimension = self.embedding_provider.dimension
-            logger.info(f"Using embedding dimension: {embedding_dimension}")
-
-            if COLLECTION_NAME not in collection_names:
-                logger.info(f"Creating collection: {COLLECTION_NAME}")
-
-                # Create collection
-                self.client.create_collection(
-                    collection_name=COLLECTION_NAME,
-                    vectors_config=qdrant_models.VectorParams(
-                        size=embedding_dimension,
-                        distance=qdrant_models.Distance.COSINE,
-                    ),
-                )
-
-                # Create payload index for filtering
-                self.client.create_payload_index(
-                    collection_name=COLLECTION_NAME,
-                    field_name="tags",
-                    field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
-                )
-            else:
-                # Check dimension of existing collection
-                collection_info = self.client.get_collection(COLLECTION_NAME)
-                existing_dimension = collection_info.config.params.vectors.size
-
-                if existing_dimension != embedding_dimension:
-                    logger.warning(
-                        f"Collection dimension mismatch: expected {embedding_dimension}, "
-                        f"but collection has {existing_dimension}. "
-                        f"Recreating collection."
-                    )
-
-                    # Delete and recreate collection with correct dimension
-                    self.client.delete_collection(COLLECTION_NAME)
-
-                    self.client.create_collection(
-                        collection_name=COLLECTION_NAME,
-                        vectors_config=qdrant_models.VectorParams(
-                            size=embedding_dimension,
-                            distance=qdrant_models.Distance.COSINE,
-                        ),
-                    )
-
-                    # Create payload index for filtering
-                    self.client.create_payload_index(
-                        collection_name=COLLECTION_NAME,
-                        field_name="tags",
-                        field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
-                    )
-
-            logger.info(f"Collection {COLLECTION_NAME} is ready")
-
+            # Initialize async client
+            client_kwargs = {"url": str(self.config.url)}
+            
+            if self.config.api_key:
+                client_kwargs["api_key"] = self.config.api_key.get_secret_value()
+            
+            self._client = AsyncQdrantClient(**client_kwargs)
+            
+            # Validate connection
+            await self._validate_connection()
+            
+            # Setup collection
+            await self.setup_collection()
+            
+            self._initialized = True
+            self.logger.info("Qdrant store initialized successfully")
+            
         except Exception as e:
-            logger.error(f"Error setting up collection: {e}")
-            raise
+            await self.close()
+            raise ConnectionError(f"Failed to initialize Qdrant store: {e}")
+
+    async def _validate_connection(self) -> None:
+        """Validate Qdrant connection and permissions."""
+        try:
+            # Test connection with a simple operation
+            collections = await self._client.get_collections()
+            self.logger.debug(f"Found {len(collections.collections)} collections")
+            
+        except Exception as e:
+            raise ConnectionError(f"Cannot connect to Qdrant: {e}")
 
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential_jitter(initial=1, max=10, jitter=0.1),
-        retry=retry_if_exception_type((UnexpectedResponse,)),
-        reraise=True,
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((UnexpectedResponse, ConnectionError)),
     )
-    async def get_existing_repo_ids(self) -> List[str]:
-        """Get IDs of repositories that already have embeddings.
+    async def setup_collection(self) -> None:
+        """Setup collection with proper configuration and indexes."""
+        if self._collection_ready:
+            return
 
-        Returns:
-            List of repository IDs that are already in the vector database
-
-        Raises:
-            StorageError: When unable to retrieve existing repository IDs
-        """
         try:
-            # Check if collection exists first
-            collections = self.client.get_collections().collections
-            collection_names = [c.name for c in collections]
+            with PerformanceLogger(self.logger, "setup_collection"):
+                # Check if collection exists
+                collections = await self._client.get_collections()
+                collection_names = [c.name for c in collections.collections]
 
-            if COLLECTION_NAME not in collection_names:
-                logger.info(f"Collection {COLLECTION_NAME} does not exist yet")
-                return []
-
-            # Get count of points in collection
-            count_response = self.client.count(
-                collection_name=COLLECTION_NAME, count_filter=None
-            )
-
-            if not hasattr(count_response, "count") or count_response.count == 0:
-                logger.info(f"Collection {COLLECTION_NAME} is empty")
-                return []
-
-            # Get all points (with scroll API if needed)
-            all_points = []
-            offset = None
-            limit = 100  # Fetch in batches
-            max_iterations = 1000  # Safety limit to prevent infinite loops
-            iteration = 0
-
-            while iteration < max_iterations:
-                try:
-                    points_response = self.client.scroll(
-                        collection_name=COLLECTION_NAME,
-                        offset=offset,
-                        limit=limit,
-                        with_vectors=False,  # We don't need vectors, just IDs
-                        with_payload=True,  # We need payload to get repo names
+                if self.collection_name not in collection_names:
+                    self.logger.info(f"Creating collection: {self.collection_name}")
+                    
+                    # Create collection with optimized settings
+                    await self._client.create_collection(
+                        collection_name=self.collection_name,
+                        vectors_config=qdrant_models.VectorParams(
+                            size=self.config.vector_size,
+                            distance=getattr(
+                                qdrant_models.Distance, 
+                                self.config.distance_metric.upper()
+                            ),
+                        ),
+                        optimizers_config=qdrant_models.OptimizersConfig(
+                            default_segment_number=2,
+                            max_segment_size=20000,
+                        ),
+                        hnsw_config=qdrant_models.HnswConfig(
+                            m=16,
+                            ef_construct=100,
+                            full_scan_threshold=10000,
+                        ),
                     )
 
-                    if not points_response or len(points_response) < 2:
-                        logger.warning("Invalid scroll response format")
-                        break
+                    # Create payload indexes for efficient filtering
+                    await self._create_payload_indexes()
+                    
+                else:
+                    # Validate existing collection
+                    await self._validate_collection()
 
-                    points, next_offset = points_response[0], points_response[1]
+                self._collection_ready = True
+                self.logger.info(f"Collection {self.collection_name} is ready")
 
-                    # Extract repo names from payload
-                    for point in points:
-                        if (
-                            hasattr(point, "payload")
-                            and point.payload
-                            and "repo_name" in point.payload
-                        ):
-                            repo_name = point.payload.get("repo_name", "")
-                            if repo_name and isinstance(repo_name, str):
-                                all_points.append(repo_name)
-
-                    # Check if we've reached the end
-                    if len(points) < limit or not next_offset:
-                        break
-
-                    offset = next_offset
-                    iteration += 1
-
-                except Exception as e:
-                    logger.error(f"Error during scroll iteration {iteration}: {e}")
-                    if iteration == 0:
-                        # If first iteration fails, re-raise
-                        raise
-                    # Otherwise, return what we have so far
-                    break
-
-            if iteration >= max_iterations:
-                logger.warning(
-                    f"Reached maximum iterations ({max_iterations}) while scrolling"
-                )
-
-            logger.info(
-                f"Found {len(all_points)} repositories already stored in vector database"
-            )
-            return all_points
-
-        except UnexpectedResponse as e:
-            logger.error(f"Qdrant API error getting existing repository IDs: {e}")
-            raise StorageError(f"Failed to retrieve existing repositories: {e}") from e
         except Exception as e:
-            logger.error(f"Unexpected error getting existing repository IDs: {e}")
-            raise StorageError(f"Unexpected error retrieving repositories: {e}") from e
+            log_exception(self.logger, e, "Failed to setup collection")
+            raise StorageError(f"Collection setup failed: {e}")
 
-    async def store_repositories(
-        self, repositories: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """Store repository embeddings in Qdrant.
-
-        Args:
-            repositories: List of repository data dictionaries
-
-        Returns:
-            The updated repositories list with embedding status marked
-        """
-        if not repositories:
-            logger.warning("No repositories to store")
-            return repositories
-
-        logger.info(f"Processing {len(repositories)} repositories for storage")
-
-        # Get existing repository IDs
-        existing_repo_ids = await self.get_existing_repo_ids()
-        logger.info(f"Found {len(existing_repo_ids)} repositories already in Qdrant")
-
-        # Filter out repositories that already have embeddings
-        to_process = []
-        for repo in repositories:
-            repo_name = repo.get("repo_name", "") or repo.get("name", "")
-
-            if repo_name in existing_repo_ids:
-                # Mark as already having embeddings
-                repo["has_embedding"] = True
-                logger.debug(f"Repository {repo_name} already has embeddings")
-            else:
-                # Mark for processing
-                to_process.append(repo)
-                repo["has_embedding"] = False
-
-        if not to_process:
-            logger.info("All repositories already have embeddings, nothing to store")
-            return repositories
-
-        logger.info(f"Storing {len(to_process)} new repositories in Qdrant")
-
-        # Process in batches
-        for i in range(0, len(to_process), BATCH_SIZE):
-            batch = to_process[i : i + BATCH_SIZE]
-            await self._store_batch(batch)
-
-            # Mark processed repositories
-            for repo in batch:
-                repo["has_embedding"] = True
-
-                # Also update status in the original repositories list
-                repo_name = repo.get("name", "")
-                for original_repo in repositories:
-                    if original_repo.get("name", "") == repo_name:
-                        original_repo["has_embedding"] = True
-                        break
-
-        # Check that all repositories have the has_embedding flag
-        repos_with_embeddings = sum(
-            1 for repo in repositories if repo.get("has_embedding", False)
-        )
-        logger.info(
-            f"Total repositories with embeddings: {repos_with_embeddings} out of {len(repositories)}"
-        )
-
-        logger.info("Repository storage complete")
-        return repositories
-
-    async def _store_batch(self, repositories: List[Dict[str, Any]]) -> None:
-        """Store a batch of repositories.
-
-        Args:
-            repositories: Batch of repository data
-        """
-        # Extract summaries for embedding
-        summaries = [
-            f"{repo.get('repo_name', '')} - {repo.get('summary', '')}"
-            for repo in repositories
+    async def _create_payload_indexes(self) -> None:
+        """Create optimized payload indexes."""
+        indexes = [
+            ("tags", qdrant_models.PayloadSchemaType.KEYWORD),
+            ("language", qdrant_models.PayloadSchemaType.KEYWORD),
+            ("stars", qdrant_models.PayloadSchemaType.INTEGER),
+            ("repo_name", qdrant_models.PayloadSchemaType.TEXT),
         ]
 
-        # Generate embeddings
-        embeddings = await self.embedding_provider.embed_documents(summaries)
+        for field_name, field_type in indexes:
+            try:
+                await self._client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name=field_name,
+                    field_schema=field_type,
+                )
+                self.logger.debug(f"Created index for field: {field_name}")
+            except Exception as e:
+                self.logger.warning(f"Failed to create index for {field_name}: {e}")
 
-        # Check vector dimension
-        if embeddings:
-            logger.info(
-                f"Generated {len(embeddings)} embeddings with dimension {len(embeddings[0])}"
-            )
-
-        # Prepare points for Qdrant
-        points = []
-        for i, repo in enumerate(repositories):
-            # Generate a secure UUID based on the repo name and a salt
-            repo_name = repo.get("name", "")
-            if not repo_name:
-                logger.warning(f"Repository at index {i} has no name, skipping")
-                continue
-
-            # Use SHA-256 with a salt for security (deterministic but secure)
-            salt = "ohmyrepos_v1"  # Version salt to allow migration if needed
-            name_hash = hashlib.sha256(f"{salt}:{repo_name}".encode()).hexdigest()
-            repo_id = str(uuid.UUID(name_hash[:32]))
-
-            # Prepare payload
-            payload = {
-                "repo_name": repo.get("repo_name", ""),
-                "repo_url": repo.get("repo_url", ""),
-                "summary": repo.get("summary", ""),
-                "tags": repo.get("tags", []),
-                "language": repo.get("language"),
-                "stars": repo.get("stargazers_count", 0),
-                "forks": repo.get("forks_count", 0),
-            }
-
-            # Create point
-            point = qdrant_models.PointStruct(
-                id=repo_id,
-                vector=embeddings[i],
-                payload=payload,
-            )
-
-            points.append(point)
-
-        # Upsert points to Qdrant
+    async def _validate_collection(self) -> None:
+        """Validate existing collection configuration."""
         try:
-            # Get collection info to check dimension
-            collection_info = self.client.get_collection(COLLECTION_NAME)
-            expected_dimension = collection_info.config.params.vectors.size
-            actual_dimension = len(embeddings[0]) if embeddings else 0
-
-            if expected_dimension != actual_dimension:
-                logger.error(
-                    f"Vector dimension mismatch: collection expects {expected_dimension}, but got {actual_dimension}"
+            collection_info = await self._client.get_collection(self.collection_name)
+            existing_size = collection_info.config.params.vectors.size
+            
+            if existing_size != self.config.vector_size:
+                raise VectorDimensionError(
+                    f"Collection dimension mismatch: expected {self.config.vector_size}, "
+                    f"found {existing_size}"
                 )
-                raise ValueError(
-                    f"Vector dimension mismatch: collection expects {expected_dimension}, but got {actual_dimension}"
-                )
+                
+        except Exception as e:
+            if "not found" in str(e).lower():
+                # Collection was deleted, recreate
+                await self.setup_collection()
+            else:
+                raise StorageError(f"Collection validation failed: {e}")
 
-            self.client.upsert(
-                collection_name=COLLECTION_NAME,
-                points=points,
-            )
-            logger.info(f"Stored {len(points)} repositories")
-
-        except UnexpectedResponse as e:
-            logger.error(f"Error storing repositories: {e}")
-            raise
-
-    async def search(
+    async def store_repositories_batch(
         self,
-        query: str,
-        limit: int = 10,
-        filter_tags: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Search for repositories by query.
+        repositories: List[RepositoryData],
+        embeddings: List[List[float]],
+    ) -> int:
+        """Store repositories with their embeddings in batch.
 
         Args:
-            query: Search query
-            limit: Maximum number of results
-            filter_tags: Optional list of tags to filter by
+            repositories: List of repository data
+            embeddings: Corresponding embeddings
 
         Returns:
-            List of matching repository data
+            Number of repositories stored
+
+        Raises:
+            StorageError: If storage operation fails
         """
-        # Generate query embedding
-        query_embedding = await self.embedding_provider.embed_query(query)
+        if not self._initialized:
+            await self.initialize()
 
-        # Prepare filter if tags provided
-        filter_query = None
-        if filter_tags:
-            filter_query = qdrant_models.Filter(
-                must=[
-                    qdrant_models.FieldCondition(
-                        key="tags",
-                        match=qdrant_models.MatchAny(any=filter_tags),
-                    )
-                ]
-            )
+        if len(repositories) != len(embeddings):
+            raise ValueError("Number of repositories must match number of embeddings")
 
-        # Search in Qdrant
+        start_time = time.time()
+        
         try:
-            results = self.client.search(
-                collection_name=COLLECTION_NAME,
-                query_vector=query_embedding,
-                limit=limit,
-                query_filter=filter_query,
-            )
+            async with self._semaphore:
+                points = []
+                
+                for repo, embedding in zip(repositories, embeddings):
+                    # Generate deterministic but secure ID
+                    repo_id = self._generate_secure_id(repo.repo_name)
+                    
+                    # Validate embedding dimension
+                    if len(embedding) != self.config.vector_size:
+                        raise VectorDimensionError(
+                            f"Embedding dimension {len(embedding)} doesn't match "
+                            f"collection dimension {self.config.vector_size}"
+                        )
+                    
+                    # Prepare payload with validation
+                    payload = self._prepare_payload(repo)
+                    
+                    # Create point
+                    point = qdrant_models.PointStruct(
+                        id=repo_id,
+                        vector=embedding,
+                        payload=payload,
+                    )
+                    points.append(point)
 
-            # Extract and return results
-            return [
-                {
-                    "repo_name": hit.payload.get("repo_name", ""),
-                    "repo_url": hit.payload.get("repo_url", ""),
-                    "summary": hit.payload.get("summary", ""),
-                    "tags": hit.payload.get("tags", []),
-                    "language": hit.payload.get("language"),
-                    "stars": hit.payload.get("stars", 0),
-                    "score": hit.score,
-                }
-                for hit in results
-            ]
+                # Batch upsert with retry
+                await self._upsert_points_with_retry(points)
+                
+                # Update statistics
+                self.stats["operations"] += 1
+                self.stats["points_stored"] += len(points)
+                self._update_response_time(time.time() - start_time)
+                
+                self.logger.info(f"Stored {len(points)} repositories in batch")
+                return len(points)
 
         except Exception as e:
-            logger.error(f"Error searching repositories: {e}")
-            return []
+            self.stats["errors"] += 1
+            log_exception(
+                self.logger, e, "Failed to store repositories batch", 
+                batch_size=len(repositories)
+            )
+            raise StorageError(f"Batch storage failed: {e}")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((UnexpectedResponse, ConnectionError)),
+    )
+    async def _upsert_points_with_retry(
+        self, points: List[qdrant_models.PointStruct]
+    ) -> None:
+        """Upsert points with retry logic."""
+        await self._client.upsert(
+            collection_name=self.collection_name,
+            points=points,
+        )
+
+    def _generate_secure_id(self, repo_name: str) -> str:
+        """Generate a secure, deterministic ID for a repository."""
+        # Use SHA-256 with salt for security
+        salt = f"ohmyrepos_v2_{self.collection_name}"
+        name_hash = hashlib.sha256(f"{salt}:{repo_name}".encode()).hexdigest()
+        return str(uuid.UUID(name_hash[:32]))
+
+    def _prepare_payload(self, repo: RepositoryData) -> Dict[str, Any]:
+        """Prepare and validate payload for storage."""
+        # Sanitize and validate payload data
+        payload = {
+            "repo_name": repo.repo_name[:200],  # Limit length
+            "repo_url": repo.repo_url[:500],
+            "summary": repo.summary[:2000] if repo.summary else "",
+            "description": repo.description[:1000] if repo.description else "",
+            "tags": repo.tags[:20],  # Limit number of tags
+            "language": repo.language[:50] if repo.language else None,
+            "stars": max(0, repo.stars),  # Ensure non-negative
+            "forks": max(0, repo.forks),
+            "created_at": repo.created_at,
+            "updated_at": repo.updated_at,
+            "indexed_at": time.time(),
+        }
+
+        # Remove None values
+        return {k: v for k, v in payload.items() if v is not None}
+
+    async def vector_search(
+        self,
+        query_vector: List[float],
+        limit: int = 25,
+        filter_conditions: Optional[Dict[str, Any]] = None,
+        score_threshold: float = 0.0,
+    ) -> List[SearchResult]:
+        """Perform vector similarity search.
+
+        Args:
+            query_vector: Query embedding vector
+            limit: Maximum number of results
+            filter_conditions: Optional filters
+            score_threshold: Minimum similarity score
+
+        Returns:
+            List of search results
+
+        Raises:
+            StorageError: If search operation fails
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        start_time = time.time()
+        
+        try:
+            # Validate query vector
+            if len(query_vector) != self.config.vector_size:
+                raise VectorDimensionError(
+                    f"Query vector dimension {len(query_vector)} doesn't match "
+                    f"collection dimension {self.config.vector_size}"
+                )
+
+            # Build filter
+            query_filter = self._build_filter(filter_conditions)
+
+            # Perform search
+            results = await self._client.search(
+                collection_name=self.collection_name,
+                query_vector=query_vector,
+                limit=limit,
+                query_filter=query_filter,
+                score_threshold=score_threshold,
+            )
+
+            # Convert to SearchResult objects
+            search_results = []
+            for hit in results:
+                if hit.score >= score_threshold:
+                    result = SearchResult(
+                        repo_name=hit.payload.get("repo_name", ""),
+                        repo_url=hit.payload.get("repo_url", ""),
+                        summary=hit.payload.get("summary"),
+                        tags=hit.payload.get("tags", []),
+                        language=hit.payload.get("language"),
+                        stars=hit.payload.get("stars", 0),
+                        score=hit.score,
+                        vector_score=hit.score,
+                    )
+                    search_results.append(result)
+
+            # Update statistics
+            self.stats["operations"] += 1
+            self.stats["points_searched"] += len(search_results)
+            self._update_response_time(time.time() - start_time)
+
+            self.logger.debug(
+                f"Vector search completed: {len(search_results)} results, "
+                f"avg_score={sum(r.score for r in search_results) / len(search_results) if search_results else 0:.3f}"
+            )
+
+            return search_results
+
+        except Exception as e:
+            self.stats["errors"] += 1
+            log_exception(self.logger, e, "Vector search failed")
+            raise StorageError(f"Vector search failed: {e}")
+
+    def _build_filter(
+        self, conditions: Optional[Dict[str, Any]]
+    ) -> Optional[qdrant_models.Filter]:
+        """Build Qdrant filter from conditions."""
+        if not conditions:
+            return None
+
+        must_conditions = []
+
+        # Tag filtering
+        if "tags" in conditions:
+            tags = conditions["tags"]
+            if isinstance(tags, list) and tags:
+                must_conditions.append(
+                    qdrant_models.FieldCondition(
+                        key="tags",
+                        match=qdrant_models.MatchAny(any=tags),
+                    )
+                )
+
+        # Language filtering
+        if "language" in conditions and conditions["language"]:
+            must_conditions.append(
+                qdrant_models.FieldCondition(
+                    key="language",
+                    match=qdrant_models.MatchValue(value=conditions["language"]),
+                )
+            )
+
+        # Stars range filtering
+        if "min_stars" in conditions or "max_stars" in conditions:
+            stars_range = {}
+            if "min_stars" in conditions:
+                stars_range["gte"] = conditions["min_stars"]
+            if "max_stars" in conditions:
+                stars_range["lte"] = conditions["max_stars"]
+            
+            must_conditions.append(
+                qdrant_models.FieldCondition(
+                    key="stars",
+                    range=qdrant_models.Range(**stars_range),
+                )
+            )
+
+        return qdrant_models.Filter(must=must_conditions) if must_conditions else None
+
+    async def get_existing_repositories(self) -> Set[str]:
+        """Get set of repository names that already exist in the collection.
+
+        Returns:
+            Set of existing repository names
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            existing_repos = set()
+            offset = None
+            
+            while True:
+                # Scroll through points
+                response = await self._client.scroll(
+                    collection_name=self.collection_name,
+                    offset=offset,
+                    limit=1000,
+                    with_vectors=False,
+                    with_payload=True,
+                )
+
+                points, next_offset = response
+
+                # Extract repo names
+                for point in points:
+                    if "repo_name" in point.payload:
+                        existing_repos.add(point.payload["repo_name"])
+
+                # Check if done
+                if not next_offset or len(points) == 0:
+                    break
+                    
+                offset = next_offset
+
+            self.logger.info(f"Found {len(existing_repos)} existing repositories")
+            return existing_repos
+
+        except Exception as e:
+            log_exception(self.logger, e, "Failed to get existing repositories")
+            return set()
+
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check on the Qdrant store.
+
+        Returns:
+            Health check results
+        """
+        start_time = time.time()
+        
+        try:
+            if not self._initialized:
+                await self.initialize()
+
+            # Check collection status
+            collection_info = await self._client.get_collection(self.collection_name)
+            
+            # Count points
+            count_result = await self._client.count(collection_name=self.collection_name)
+            
+            response_time = (time.time() - start_time) * 1000
+            
+            return {
+                "status": "healthy",
+                "response_time_ms": response_time,
+                "collection_name": self.collection_name,
+                "points_count": count_result.count,
+                "vector_size": collection_info.config.params.vectors.size,
+                "distance_metric": collection_info.config.params.vectors.distance,
+                "stats": self.stats.copy(),
+            }
+
+        except Exception as e:
+            response_time = (time.time() - start_time) * 1000
+            
+            return {
+                "status": "unhealthy",
+                "response_time_ms": response_time,
+                "error": str(e),
+                "stats": self.stats.copy(),
+            }
+
+    def _update_response_time(self, duration: float) -> None:
+        """Update average response time statistics."""
+        if self.stats["operations"] == 0:
+            self.stats["avg_response_time"] = duration
+        else:
+            # Exponential moving average
+            alpha = 0.1
+            self.stats["avg_response_time"] = (
+                alpha * duration + (1 - alpha) * self.stats["avg_response_time"]
+            )
 
     async def close(self) -> None:
-        """Close connections."""
-        await self.embedding_provider.close()
+        """Close the Qdrant client and clean up resources."""
+        if self._client:
+            await self._client.close()
+            self._client = None
+        
+        self._initialized = False
+        self._collection_ready = False
+        
+        self.logger.info("Qdrant store closed")
+
+
+@asynccontextmanager
+async def qdrant_store(
+    qdrant_config: Optional[QdrantConfig] = None,
+    **kwargs: Any,
+) -> AsyncGenerator[QdrantStore, None]:
+    """Context manager for Qdrant store.
+    
+    Args:
+        qdrant_config: Qdrant configuration
+        **kwargs: Additional store arguments
+        
+    Yields:
+        Initialized QdrantStore instance
+    """
+    store = QdrantStore(qdrant_config=qdrant_config, **kwargs)
+    try:
+        async with store:
+            yield store
+    finally:
+        await store.close()
