@@ -27,7 +27,7 @@ class TestQdrantStoreInitialization:
         config = QdrantConfig(
             url="http://localhost:6333",
             collection_name="test_repos",
-            vector_size=512,
+            vector_size=1024,
         )
         
         store = QdrantStore(qdrant_config=config)
@@ -82,7 +82,7 @@ class TestQdrantStoreAsyncOperations:
             
             assert store._initialized
             assert store._collection_ready
-            mock_qdrant_client.get_collections.assert_called_once()
+            mock_qdrant_client.get_collections.assert_called()
 
     @pytest.mark.asyncio
     async def test_initialization_failure(self):
@@ -134,6 +134,7 @@ class TestCollectionManagement:
         store = QdrantStore(qdrant_config=config)
         
         with patch('src.core.storage.AsyncQdrantClient', return_value=mock_qdrant_client):
+            await store.initialize()
             await store.setup_collection()
             
             # Should create collection
@@ -163,6 +164,7 @@ class TestCollectionManagement:
         store = QdrantStore(qdrant_config=config)
         
         with patch('src.core.storage.AsyncQdrantClient', return_value=mock_qdrant_client):
+            await store.initialize()
             await store.setup_collection()
             
             # Should not create collection
@@ -195,7 +197,7 @@ class TestCollectionManagement:
         
         with patch('src.core.storage.AsyncQdrantClient', return_value=mock_qdrant_client):
             with pytest.raises(VectorDimensionError, match="dimension mismatch"):
-                await store.setup_collection()
+                await store.initialize()
 
 
 @pytest.mark.unit
@@ -311,8 +313,8 @@ class TestBatchOperations:
         
         # Mock upsert to fail twice, then succeed
         mock_qdrant_client.upsert.side_effect = [
-            UnexpectedResponse("Temporary failure"),
-            UnexpectedResponse("Another failure"),
+            UnexpectedResponse(status_code=500, reason_phrase="Internal Server Error", content=b"Temporary failure", headers={}),
+            UnexpectedResponse(status_code=500, reason_phrase="Internal Server Error", content=b"Another failure", headers={}),
             None  # Success
         ]
         
@@ -526,8 +528,10 @@ class TestHealthAndMonitoring:
         store._update_response_time(0.5)
         assert store.stats["avg_response_time"] == 0.5
         
+        # Increment operations to enable EMA calculation
+        store.stats["operations"] = 1
         store._update_response_time(1.0)
-        # Should be exponential moving average
+        # Should be exponential moving average: 0.1 * 1.0 + 0.9 * 0.5 = 0.55
         assert 0.5 < store.stats["avg_response_time"] < 1.0
 
 

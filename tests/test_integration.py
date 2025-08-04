@@ -96,12 +96,14 @@ class TestIntegration:
         from pydantic import SecretStr
         
         # Create a mock response for the user validation call
-        mock_user_response = AsyncMock()
+        mock_user_response = Mock()
         mock_user_response.status_code = 200
         mock_user_response.json.return_value = {"login": "testuser"}
+        mock_user_response.raise_for_status.return_value = None
+        mock_user_response.is_success = True
         
         # Create a mock response for the starred repos call
-        mock_repos_response = AsyncMock()
+        mock_repos_response = Mock()
         mock_repos_response.status_code = 200
         mock_repos_response.json.return_value = [
             {
@@ -123,6 +125,8 @@ class TestIntegration:
                 }
             }
         ]
+        mock_repos_response.raise_for_status.return_value = None
+        mock_repos_response.is_success = True
         
         # Mock the HTTP client
         with patch('src.core.collector.httpx.AsyncClient') as mock_client_class:
@@ -143,7 +147,7 @@ class TestIntegration:
                 repos.append(repo)
             
             assert len(repos) == 1
-            assert repos[0].full_name == "test/repo"
+            assert repos[0].repo_name == "test/repo"
             
             await collector.close()
 
@@ -171,11 +175,12 @@ class TestIntegration:
         # Test that settings can be loaded
         assert settings is not None
         assert hasattr(settings, 'GITHUB_USERNAME')
-        assert hasattr(settings, 'BM25_WEIGHT')
-        assert hasattr(settings, 'VECTOR_WEIGHT')
+        assert hasattr(settings, 'search')
+        assert hasattr(settings.search, 'bm25_weight')
+        assert hasattr(settings.search, 'vector_weight')
         
         # Test weight normalization
-        total_weight = settings.BM25_WEIGHT + settings.VECTOR_WEIGHT
+        total_weight = settings.search.bm25_weight + settings.search.vector_weight
         assert abs(total_weight - 1.0) < 0.01  # Allow small floating point errors
 
     @pytest.mark.asyncio

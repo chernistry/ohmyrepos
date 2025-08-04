@@ -3,23 +3,15 @@
 This package contains adapters for different LLM providers.
 """
 
-from typing import Dict, Type, Optional, Any
+from typing import Any
 
-from src.llm.providers.base import BaseLLMProvider
+from src.llm.providers.base import BaseLLMProvider, get_provider_registry
+
+# Import built-in providers to trigger registration
+from src.llm.providers import openai  # noqa: F401
+from src.llm.providers import ollama  # noqa: F401
 
 __all__ = ["get_provider", "BaseLLMProvider"]
-
-_PROVIDERS: Dict[str, Type[BaseLLMProvider]] = {}
-
-
-def register_provider(name: str):
-    """Register a provider class."""
-
-    def decorator(cls: Type[BaseLLMProvider]) -> Type[BaseLLMProvider]:
-        _PROVIDERS[name] = cls
-        return cls
-
-    return decorator
 
 
 def get_provider(name: str, **kwargs: Any) -> BaseLLMProvider:
@@ -32,13 +24,11 @@ def get_provider(name: str, **kwargs: Any) -> BaseLLMProvider:
     Returns:
         A provider instance
     """
-    if name not in _PROVIDERS:
-        # Import built-in providers
-        from src.llm.providers import openai  # noqa: F401
-        from src.llm.providers import ollama  # noqa: F401
-
-        # Check again after imports
-        if name not in _PROVIDERS:
-            raise ValueError(f"Unknown provider: {name}")
-
-    return _PROVIDERS[name](**kwargs)
+    registry = get_provider_registry()
+    
+    # Get provider class from registry and instantiate
+    try:
+        provider_class = registry.get_provider(name)
+        return provider_class(**kwargs)
+    except KeyError:
+        raise ValueError(f"Unknown provider: {name}")

@@ -130,6 +130,10 @@ class QdrantStore(LoggerMixin):
             self._initialized = True
             self.logger.info("Qdrant store initialized successfully")
             
+        except VectorDimensionError:
+            # Re-raise VectorDimensionError as-is
+            await self.close()
+            raise
         except Exception as e:
             await self.close()
             raise ConnectionError(f"Failed to initialize Qdrant store: {e}")
@@ -176,6 +180,9 @@ class QdrantStore(LoggerMixin):
                         optimizers_config=qdrant_models.OptimizersConfig(
                             default_segment_number=2,
                             max_segment_size=20000,
+                            deleted_threshold=0.2,
+                            vacuum_min_vector_number=1000,
+                            flush_interval_sec=5,
                         ),
                         hnsw_config=qdrant_models.HnswConfig(
                             m=16,
@@ -194,6 +201,9 @@ class QdrantStore(LoggerMixin):
                 self._collection_ready = True
                 self.logger.info(f"Collection {self.collection_name} is ready")
 
+        except VectorDimensionError:
+            # Re-raise VectorDimensionError as-is
+            raise
         except Exception as e:
             log_exception(self.logger, e, "Failed to setup collection")
             raise StorageError(f"Collection setup failed: {e}")
@@ -230,6 +240,9 @@ class QdrantStore(LoggerMixin):
                     f"found {existing_size}"
                 )
                 
+        except VectorDimensionError:
+            # Re-raise VectorDimensionError as-is
+            raise
         except Exception as e:
             if "not found" in str(e).lower():
                 # Collection was deleted, recreate
@@ -299,6 +312,10 @@ class QdrantStore(LoggerMixin):
                 self.logger.info(f"Stored {len(points)} repositories in batch")
                 return len(points)
 
+        except VectorDimensionError:
+            # Re-raise VectorDimensionError as-is
+            self.stats["errors"] += 1
+            raise
         except Exception as e:
             self.stats["errors"] += 1
             log_exception(
@@ -422,6 +439,10 @@ class QdrantStore(LoggerMixin):
 
             return search_results
 
+        except VectorDimensionError:
+            # Re-raise VectorDimensionError as-is
+            self.stats["errors"] += 1
+            raise
         except Exception as e:
             self.stats["errors"] += 1
             log_exception(self.logger, e, "Vector search failed")
