@@ -3,7 +3,7 @@
 This module provides functionality to rerank search results using Jina AI reranker model.
 
 Note:
-    Avoid using unescaped backslashes in docstrings (e.g., use `\\(` instead of `\(`).
+    Avoid using unescaped backslashes in docstrings (e.g., use \\( instead of \\().
 """
 
 import logging
