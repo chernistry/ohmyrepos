@@ -1,142 +1,194 @@
-"""Ollama provider for LLM interactions.
+"""Enterprise-grade Ollama provider with comprehensive error handling and monitoring."""
 
-This module provides a provider for interacting with local Ollama models.
-"""
-
+import asyncio
 import json
-import logging
-from typing import Dict, Any, AsyncGenerator
+import time
+from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
 import httpx
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
-from src.llm.providers.base import BaseLLMProvider
-from src.llm.providers import register_provider
-
-logger = logging.getLogger(__name__)
+from .base import (
+    BaseLLMProvider,
+    ChatCompletionRequest,
+    ChatCompletionResponse,
+    ChatCompletionChoice,
+    ChatCompletionUsage,
+    ChatMessage,
+    StreamingChunk,
+    StreamingChoice,
+    HealthCheck,
+    LLMError,
+    RateLimitError,
+    AuthenticationError,
+    ModelNotFoundError,
+    TokenLimitError,
+    register_provider,
+)
 
 
 @register_provider("ollama")
 class OllamaProvider(BaseLLMProvider):
-    """Provider for Ollama API.
+    """Enterprise-grade Ollama provider for local LLM deployment.
 
-    This class handles communication with the Ollama API for chat completions.
+    Features:
+    - Automatic retry with exponential backoff
+    - Proper chat message formatting for local models
+    - Health monitoring and model management
+    - Resource management and cleanup
+    - Both streaming and non-streaming support
+    - Context window management
     """
 
     def __init__(
         self,
         base_url: str = "http://127.0.0.1:11434",
         timeout: int = 60,
+        keep_alive: str = "5m",
+        num_ctx: int = 4096,
+        **kwargs: Any,
     ) -> None:
-        """Initialize the Ollama provider.
+        """Initialize Ollama provider.
 
         Args:
-            base_url: Base URL for the Ollama API
+            base_url: Ollama server URL
             timeout: Request timeout in seconds
+            keep_alive: Model keep-alive duration
+            num_ctx: Context window size
+            **kwargs: Additional configuration
         """
-        self.base_url = base_url
+        super().__init__(**kwargs)
+        self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.client = httpx.AsyncClient(timeout=timeout)
-        logger.debug(f"Initialized OllamaProvider with base_url: {base_url}")
+        self.keep_alive = keep_alive
+        self.num_ctx = num_ctx
+        self._client: Optional[httpx.AsyncClient] = None
+        self._models_cache: Optional[List[str]] = None
+        self._models_cache_time: float = 0
+        self._models_cache_ttl: int = 300  # 5 minutes (faster refresh for local)
 
-    async def chat_completion(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate a chat completion.
+    async def initialize(self) -> None:
+        """Initialize the Ollama provider and validate server connection."""
+        if self._initialized:
+            return
+
+        self._client = httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=httpx.Timeout(self.timeout),
+            headers={"Content-Type": "application/json"},
+        )
+
+        # Validate server connection
+        try:
+            await self.health_check()
+            self._initialized = True
+        except Exception as e:
+            await self.close()
+            raise LLMError(f"Failed to initialize Ollama provider: {e}")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=8),
+        retry=retry_if_exception_type((httpx.TimeoutException, httpx.ConnectError)),
+    )
+    async def chat_completion(
+        self, request: ChatCompletionRequest
+    ) -> Union[ChatCompletionResponse, AsyncGenerator[StreamingChunk, None]]:
+        """Generate a chat completion with Ollama.
 
         Args:
-            payload: Chat completion parameters
+            request: Strongly typed chat completion request
 
         Returns:
-            Chat completion response
+            Chat completion response or streaming generator
+
+        Raises:
+            Various LLMError subclasses based on error type
         """
-        # Extract parameters from payload
-        model = payload.get("model", "phi3.5:3.8b")  # Default model
-        messages = payload.get("messages", [])
-        temperature = payload.get("temperature", 0.7)
-        max_tokens = payload.get("max_tokens", 1024)
-        stream = payload.get("stream", False)
+        if not self._initialized:
+            await self.initialize()
 
         # Convert messages to Ollama format
-        prompt = self._format_messages(messages)
+        prompt = self._format_messages(request.messages)
 
-        # Prepare Ollama API payload
-        ollama_payload = {
-            "model": model,
+        # Prepare Ollama payload
+        payload = {
+            "model": request.model,
             "prompt": prompt,
-            "temperature": temperature,
-            "num_predict": max_tokens,
-            "stream": stream,
+            "stream": request.stream,
             "options": {
-                "num_ctx": 4096,  # Default context window
+                "temperature": request.temperature,
+                "num_predict": request.max_tokens,
+                "top_p": request.top_p,
+                "num_ctx": self.num_ctx,
+                "stop": request.stop if request.stop else [],
             },
+            "keep_alive": self.keep_alive,
         }
 
-        # Handle streaming vs non-streaming
-        if stream:
-            return self._stream_response(ollama_payload)
+        if request.stream:
+            return self._stream_completion(payload)
         else:
-            return await self._generate_response(ollama_payload)
+            return await self._complete_chat(payload, request.model)
 
-    async def _generate_response(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate a non-streaming response.
-
-        Args:
-            payload: Ollama API payload
-
-        Returns:
-            Formatted response
-        """
+    async def _complete_chat(
+        self, payload: Dict[str, Any], model: str
+    ) -> ChatCompletionResponse:
+        """Handle non-streaming chat completion."""
         try:
-            url = f"{self.base_url}/api/generate"
-            response = await self.client.post(url, json=payload)
-            response.raise_for_status()
+            response = await self._client.post("/api/generate", json=payload)
+            await self._handle_response_errors(response)
 
             data = response.json()
 
-            # Convert Ollama response to OpenAI-like format for compatibility
-            return {
-                "id": "ollama-" + payload["model"],
-                "object": "chat.completion",
-                "created": 0,  # Ollama doesn't provide timestamp
-                "model": payload["model"],
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": data.get("response", ""),
-                        },
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": data.get("prompt_eval_count", 0),
-                    "completion_tokens": data.get("eval_count", 0),
-                    "total_tokens": data.get("prompt_eval_count", 0)
-                    + data.get("eval_count", 0),
-                },
-            }
+            # Convert Ollama response to OpenAI-compatible format
+            choices = [
+                ChatCompletionChoice(
+                    index=0,
+                    message=ChatMessage(
+                        role="assistant",
+                        content=data.get("response", ""),
+                    ),
+                    finish_reason="stop" if data.get("done", False) else None,
+                )
+            ]
 
-        except Exception as e:
-            logger.error(f"Error in Ollama API call: {e}")
+            usage = None
+            if "prompt_eval_count" in data or "eval_count" in data:
+                prompt_tokens = data.get("prompt_eval_count", 0)
+                completion_tokens = data.get("eval_count", 0)
+                usage = ChatCompletionUsage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=prompt_tokens + completion_tokens,
+                )
+
+            return ChatCompletionResponse(
+                id=f"ollama-{model}-{int(time.time())}",
+                created=int(time.time()),
+                model=model,
+                choices=choices,
+                usage=usage,
+            )
+
+        except httpx.HTTPStatusError as e:
+            await self._handle_response_errors(e.response)
             raise
 
-    async def _stream_response(
+    async def _stream_completion(
         self, payload: Dict[str, Any]
-    ) -> AsyncGenerator[str, None]:
-        """Stream response from Ollama API.
-
-        Args:
-            payload: Ollama API payload
-
-        Yields:
-            Streamed response chunks
-        """
-        url = f"{self.base_url}/api/generate"
-
+    ) -> AsyncGenerator[StreamingChunk, None]:
+        """Handle streaming chat completion."""
         try:
-            async with self.client.stream(
-                "POST", url, json=payload, timeout=None
+            async with self._client.stream(
+                "POST", "/api/generate", json=payload
             ) as response:
-                response.raise_for_status()
+                await self._handle_response_errors(response)
 
                 async for line in response.aiter_lines():
                     if not line.strip():
@@ -144,63 +196,175 @@ class OllamaProvider(BaseLLMProvider):
 
                     try:
                         data = json.loads(line)
+                        
+                        # Convert to OpenAI-compatible streaming format
+                        choices = [
+                            StreamingChoice(
+                                index=0,
+                                delta={"content": data.get("response", "")},
+                                finish_reason="stop" if data.get("done", False) else None,
+                            )
+                        ]
 
-                        # Format in OpenAI-like streaming format
-                        chunk = {
-                            "choices": [
-                                {
-                                    "delta": {
-                                        "content": data.get("response", ""),
-                                    },
-                                    "finish_reason": (
-                                        "stop" if data.get("done", False) else None
-                                    ),
-                                    "index": 0,
-                                }
-                            ],
-                            "model": payload["model"],
-                        }
-
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                        yield StreamingChunk(
+                            id=f"ollama-{payload['model']}-{int(time.time())}",
+                            created=int(time.time()),
+                            model=payload["model"],
+                            choices=choices,
+                        )
 
                         if data.get("done", False):
-                            yield "data: [DONE]\n\n"
+                            break
 
                     except json.JSONDecodeError:
-                        logger.warning(f"Failed to parse streaming response: {line}")
+                        # Skip malformed chunks
+                        continue
 
-        except Exception as e:
-            logger.error(f"Error in Ollama streaming: {e}")
-            raise
+        except httpx.HTTPStatusError as e:
+            await self._handle_response_errors(e.response)
 
-    def _format_messages(self, messages: list) -> str:
-        """Format messages for Ollama API.
+    def _format_messages(self, messages: List[ChatMessage]) -> str:
+        """Format messages for Ollama.
 
-        Args:
-            messages: List of message objects
-
-        Returns:
-            Formatted prompt string
+        Ollama typically expects a single prompt string rather than
+        a messages array, so we format the conversation appropriately.
         """
-        formatted_prompt = ""
+        formatted_parts = []
 
         for message in messages:
-            role = message.get("role", "")
-            content = message.get("content", "")
+            role = message.role
+            content = message.content
 
             if role == "system":
-                formatted_prompt += f"<|system|>\n{content}\n"
+                formatted_parts.append(f"System: {content}")
             elif role == "user":
-                formatted_prompt += f"<|user|>\n{content}\n"
+                formatted_parts.append(f"Human: {content}")
             elif role == "assistant":
-                formatted_prompt += f"<|assistant|>\n{content}\n"
+                formatted_parts.append(f"Assistant: {content}")
 
-        # Add final assistant prompt
-        if not formatted_prompt.endswith("<|assistant|>\n"):
-            formatted_prompt += "<|assistant|>\n"
+        # Add final prompt for assistant response
+        formatted_parts.append("Assistant:")
+        
+        return "\n\n".join(formatted_parts)
 
-        return formatted_prompt
+    async def _handle_response_errors(self, response: httpx.Response) -> None:
+        """Handle HTTP response errors with proper classification."""
+        if response.is_success:
+            return
+
+        status_code = response.status_code
+        
+        try:
+            error_data = response.json()
+            error_message = error_data.get("error", "Unknown error")
+        except (json.JSONDecodeError, KeyError):
+            error_message = f"HTTP {status_code}: {response.text}"
+
+        # Classify errors for Ollama
+        if status_code == 404:
+            if "model" in error_message.lower():
+                raise ModelNotFoundError(error_message, status_code)
+            else:
+                raise LLMError(error_message, status_code)
+        elif status_code == 400:
+            raise LLMError(error_message, status_code)
+        elif status_code >= 500:
+            raise LLMError(f"Ollama server error: {error_message}", status_code)
+        else:
+            raise LLMError(error_message, status_code)
+
+    async def health_check(self) -> HealthCheck:
+        """Perform comprehensive health check."""
+        start_time = time.time()
+        
+        try:
+            if not self._client:
+                await self.initialize()
+
+            # Check server status
+            response = await self._client.get("/api/tags", timeout=10.0)
+            response.raise_for_status()
+
+            response_time = (time.time() - start_time) * 1000
+
+            return HealthCheck(
+                status="healthy",
+                response_time_ms=response_time,
+                timestamp=time.time(),
+            )
+
+        except Exception as e:
+            response_time = (time.time() - start_time) * 1000
+            
+            return HealthCheck(
+                status="unhealthy",
+                response_time_ms=response_time,
+                error=str(e),
+                timestamp=time.time(),
+            )
+
+    async def list_models(self) -> List[str]:
+        """List available models with caching."""
+        current_time = time.time()
+        
+        # Check cache
+        if (
+            self._models_cache 
+            and current_time - self._models_cache_time < self._models_cache_ttl
+        ):
+            return self._models_cache
+
+        try:
+            if not self._client:
+                await self.initialize()
+
+            response = await self._client.get("/api/tags")
+            await self._handle_response_errors(response)
+
+            data = response.json()
+            models = [model["name"] for model in data.get("models", [])]
+            
+            # Cache results
+            self._models_cache = models
+            self._models_cache_time = current_time
+            
+            return models
+
+        except Exception as e:
+            # Return cached results if available
+            if self._models_cache:
+                return self._models_cache
+            raise LLMError(f"Failed to list models: {e}")
+
+    async def pull_model(self, model_name: str) -> bool:
+        """Pull a model from Ollama registry.
+
+        Args:
+            model_name: Name of the model to pull
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if not self._client:
+                await self.initialize()
+
+            payload = {"name": model_name}
+            response = await self._client.post("/api/pull", json=payload)
+            await self._handle_response_errors(response)
+            
+            # Clear models cache to force refresh
+            self._models_cache = None
+            
+            return True
+
+        except Exception:
+            return False
 
     async def close(self) -> None:
-        """Close the HTTP client."""
-        await self.client.aclose()
+        """Clean up resources."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+        self._initialized = False
+        self._models_cache = None
