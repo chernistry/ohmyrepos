@@ -8,6 +8,10 @@ It ensures that the project's directory is in the Python path.
 import os
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Add the project directory to the Python path
 project_dir = Path(__file__).resolve().parent

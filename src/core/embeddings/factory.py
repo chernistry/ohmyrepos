@@ -4,6 +4,7 @@ This module provides a factory for creating embedding providers.
 """
 
 import logging
+import os
 from typing import Dict, Type, Optional
 
 from src.config import settings
@@ -48,9 +49,9 @@ class EmbeddingFactory:
             ValueError: If the provider is not supported
         """
         # Use settings as defaults if not provided
-        model_name = model_name or settings.EMBEDDING_MODEL
-        api_key = api_key or settings.EMBEDDING_MODEL_API_KEY
-        api_url = api_url or settings.EMBEDDING_MODEL_URL
+        model_name = model_name or os.getenv("EMBEDDING_MODEL", "jina-embeddings-v3")
+        api_key = api_key or os.getenv("EMBEDDING_MODEL_API_KEY", "")
+        api_url = api_url or os.getenv("EMBEDDING_MODEL_URL", "https://api.jina.ai/v1/embeddings")
 
         # Find provider class based on model name
         provider_class = None

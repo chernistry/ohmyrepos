@@ -4,6 +4,7 @@ This module provides an embedding provider using Jina AI's embedding models.
 """
 
 import logging
+import os
 from typing import List, Optional
 import time
 
@@ -49,9 +50,9 @@ class JinaEmbeddingProvider(EmbeddingProvider):
             config: Configuration for the provider
         """
         self.config = config or EmbeddingConfig(
-            model_name=settings.EMBEDDING_MODEL,
-            api_key=settings.EMBEDDING_MODEL_API_KEY,
-            api_url=settings.EMBEDDING_MODEL_URL,
+            model_name=os.getenv("EMBEDDING_MODEL", "jina-embeddings-v3"),
+            api_key=os.getenv("EMBEDDING_MODEL_API_KEY", ""),
+            api_url=os.getenv("EMBEDDING_MODEL_URL", "https://api.jina.ai/v1/embeddings"),
         )
 
         self.api_url = self.config.api_url or "https://api.jina.ai/v1/embeddings"

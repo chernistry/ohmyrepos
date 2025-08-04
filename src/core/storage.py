@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -122,7 +123,10 @@ class QdrantStore(LoggerMixin):
             # Use sync client first to verify connection
             try:
                 from qdrant_client import QdrantClient
-                sync_client = QdrantClient(url=str(self.config.url))
+                sync_kwargs = {"url": str(self.config.url)}
+                if self.config.api_key:
+                    sync_kwargs["api_key"] = self.config.api_key.get_secret_value()
+                sync_client = QdrantClient(**sync_kwargs)
                 sync_client.get_collections()
                 self.logger.debug("Successfully connected to Qdrant using sync client")
             except Exception as sync_error:
@@ -188,7 +192,18 @@ class QdrantStore(LoggerMixin):
             with PerformanceLogger(self.logger, "setup_collection"):
                 # Verify client is initialized
                 if not self._client:
-                    raise StorageError("Cannot setup collection: Qdrant client is not initialized")
+                    # Try to reinitialize client if it's not available
+                    self.logger.warning("Qdrant client not initialized, attempting to initialize")
+                    client_kwargs = {"url": str(self.config.url)}
+                    
+                    if self.config.api_key:
+                        client_kwargs["api_key"] = self.config.api_key.get_secret_value()
+                    
+                    try:
+                        self._client = AsyncQdrantClient(**client_kwargs)
+                        self.logger.debug(f"Reinitialized Qdrant client with URL: {self.config.url}")
+                    except Exception as client_error:
+                        raise StorageError(f"Cannot setup collection: Failed to initialize Qdrant client: {client_error}")
                 
                 # Check if collection exists
                 try:
@@ -623,6 +638,130 @@ class QdrantStore(LoggerMixin):
             self.stats["avg_response_time"] = (
                 alpha * duration + (1 - alpha) * self.stats["avg_response_time"]
             )
+            
+    async def store_repositories(self, repositories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Store repositories in the vector database.
+        
+        Args:
+            repositories: List of repository data dictionaries
+            
+        Returns:
+            Updated list of repositories with embedding status
+        """
+        if not self._initialized:
+            await self.initialize()
+            
+        from src.core.embeddings.factory import EmbeddingFactory
+        
+        # Get existing repositories to avoid re-embedding
+        try:
+            existing_repos = await self.get_existing_repositories()
+            self.logger.info(f"Found {len(existing_repos)} existing repositories in vector database")
+        except Exception as e:
+            self.logger.warning(f"Failed to get existing repositories: {e}")
+            existing_repos = set()
+            
+        # Create embedding provider with API key from environment
+        api_key = os.getenv("EMBEDDING_MODEL_API_KEY")
+        if not api_key:
+            raise ValueError("EMBEDDING_MODEL_API_KEY environment variable is required")
+            
+        self.logger.debug(f"Using API key: {api_key[:5]}...{api_key[-5:]}")
+        embedding_provider = EmbeddingFactory.get_provider(
+            api_key=api_key
+        )
+        
+        # Process repositories in batches
+        batch_size = self.batch_size
+        total_processed = 0
+        
+        for i in range(0, len(repositories), batch_size):
+            batch = repositories[i:i+batch_size]
+            repos_to_embed = []
+            embeddings = []
+            
+            # Generate embeddings for repositories that need them
+            for repo in batch:
+                repo_name = repo.get("repo_name", "")
+                
+                # Skip if already has embedding
+                if repo_name in existing_repos:
+                    repo["has_embedding"] = True
+                    continue
+                    
+                # Check if repository has valid summary and tags
+                has_summary = (
+                    repo.get("summary")
+                    and isinstance(repo.get("summary"), str)
+                    and len(repo.get("summary", "")) > 10
+                )
+                has_tags = (
+                    repo.get("tags")
+                    and isinstance(repo.get("tags"), list)
+                    and len(repo.get("tags", [])) > 0
+                )
+                
+                if not has_summary or not has_tags:
+                    repo["has_embedding"] = False
+                    continue
+                
+                # Prepare text for embedding
+                text = f"{repo.get('repo_name', '')} - {repo.get('summary', '')}"
+                if repo.get('tags'):
+                    text += f" Tags: {', '.join(repo.get('tags', []))}"
+                
+                # Generate embedding
+                try:
+                    embedding = await embedding_provider.embed_query(text)
+                    repos_to_embed.append(repo)
+                    embeddings.append(embedding)
+                except Exception as e:
+                    self.logger.error(f"Failed to generate embedding for {repo_name}: {e}")
+                    repo["has_embedding"] = False
+                    continue
+            
+            # Store embeddings in vector database
+            if repos_to_embed and embeddings:
+                try:
+                    # Convert to RepositoryData objects
+                    repo_objects = []
+                    for repo_dict in repos_to_embed:
+                        from src.core.models import RepositoryData
+                        
+                        repo_obj = RepositoryData(
+                            repo_name=repo_dict.get("repo_name", ""),
+                            repo_url=repo_dict.get("repo_url", ""),
+                            summary=repo_dict.get("summary", ""),
+                            description=repo_dict.get("description", ""),
+                            tags=repo_dict.get("tags", []),
+                            language=repo_dict.get("language", ""),
+                            stars=repo_dict.get("stars", 0),
+                            forks=repo_dict.get("forks", 0),
+                            created_at=repo_dict.get("created_at", ""),
+                            updated_at=repo_dict.get("updated_at", ""),
+                        )
+                        repo_objects.append(repo_obj)
+                    
+                    # Store batch
+                    stored_count = await self.store_repositories_batch(repo_objects, embeddings)
+                    
+                    # Update embedding status
+                    for j, repo in enumerate(repos_to_embed):
+                        if j < stored_count:
+                            repo["has_embedding"] = True
+                            total_processed += 1
+                        else:
+                            repo["has_embedding"] = False
+                            
+                except Exception as e:
+                    self.logger.error(f"Failed to store batch: {e}")
+                    for repo in repos_to_embed:
+                        repo["has_embedding"] = False
+            
+            self.logger.info(f"Processed batch {i//batch_size + 1}/{len(repositories)//batch_size + 1}")
+        
+        self.logger.info(f"Successfully stored {total_processed} repositories in vector database")
+        return repositories
 
     async def close(self) -> None:
         """Close the Qdrant client and clean up resources."""
