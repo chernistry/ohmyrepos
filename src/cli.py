@@ -268,7 +268,10 @@ async def _collect_repos() -> List[Dict[str, Any]]:
     """
     collector = RepoCollector()
     try:
-        return await collector.collect_starred_repos()
+        repos = []
+        async for repo in collector.collect_starred_repos():
+            repos.append(repo)
+        return repos
     finally:
         await collector.close()
 
@@ -455,7 +458,9 @@ async def _process_repos(
         console.print("Collecting repositories from GitHub")
         collector = RepoCollector()
         try:
-            repos = await collector.collect_starred_repos()
+            repos = []
+            async for repo in collector.collect_starred_repos():
+                repos.append(repo)
         finally:
             await collector.close()
 

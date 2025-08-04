@@ -15,10 +15,11 @@ import numpy as np
 
 # Fix imports for compatibility
 try:
+    from ..config import settings
+    from ..core.storage import QdrantStore
+except ImportError:
     from src.config import settings
     from src.core.storage import QdrantStore
-except ImportError:
-    from core.storage import QdrantStore
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ class HybridRetriever:
         # Initialize Qdrant store if not provided
         if self.qdrant_store is None:
             self.qdrant_store = QdrantStore()
-            await self.qdrant_store.setup_collection()
+            await self.qdrant_store.initialize()
 
         # Load repository data for BM25 indexing
         await self._load_repo_data()

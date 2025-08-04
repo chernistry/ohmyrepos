@@ -19,9 +19,11 @@ from typing import Any, AsyncGenerator, Dict, Union, Optional
 try:
     from src.config import settings
     from src.llm.providers import get_provider, BaseLLMProvider
+    from src.llm.providers.base import ChatCompletionRequest, ChatMessage, ChatCompletionResponse, StreamingChunk
 except ImportError:
     from config import settings
     from llm.providers import get_provider
+    from llm.providers.base import ChatCompletionRequest, ChatMessage, ChatCompletionResponse, StreamingChunk
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +94,57 @@ class ChatAdapter:
         if "model" not in payload:
             payload["model"] = self.default_model
 
-        return await self._provider.chat_completion(payload)
+        # Convert dict payload to ChatCompletionRequest
+        messages = []
+        for msg in payload.get("messages", []):
+            messages.append(ChatMessage(
+                role=msg["role"],
+                content=msg["content"]
+            ))
+        
+        request = ChatCompletionRequest(
+            messages=messages,
+            model=payload["model"],
+            temperature=payload.get("temperature", 0.1),
+            max_tokens=payload.get("max_tokens", 1000),
+            top_p=payload.get("top_p", 1.0),
+            frequency_penalty=payload.get("frequency_penalty", 0.0),
+            presence_penalty=payload.get("presence_penalty", 0.0),
+            stop=payload.get("stop"),
+            stream=payload.get("stream", False),
+            n=payload.get("n", 1)
+        )
+
+        result = await self._provider.chat_completion(request)
+        
+        # Handle streaming vs non-streaming responses
+        if isinstance(result, ChatCompletionResponse):
+            # Convert to dict format for backward compatibility
+            return {
+                "id": result.id,
+                "object": "chat.completion",
+                "created": result.created,
+                "model": result.model,
+                "choices": [
+                    {
+                        "index": choice.index,
+                        "message": {
+                            "role": choice.message.role,
+                            "content": choice.message.content
+                        },
+                        "finish_reason": choice.finish_reason
+                    }
+                    for choice in result.choices
+                ],
+                "usage": {
+                    "prompt_tokens": result.usage.prompt_tokens if result.usage else 0,
+                    "completion_tokens": result.usage.completion_tokens if result.usage else 0,
+                    "total_tokens": result.usage.total_tokens if result.usage else 0
+                } if result.usage else None
+            }
+        else:
+            # Return async generator as-is for streaming
+            return result
 
     async def close(self) -> None:
         """Close the provider."""

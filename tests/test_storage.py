@@ -38,8 +38,10 @@ class TestQdrantStoreInitialization:
 
     def test_init_without_config_fails(self):
         """Test that initialization fails without configuration."""
-        with pytest.raises(ValueError, match="Qdrant configuration is required"):
-            QdrantStore(qdrant_config=None)
+        with patch('src.core.storage.settings') as mock_settings:
+            mock_settings.qdrant = None
+            with pytest.raises(ValueError, match="Qdrant configuration is required"):
+                QdrantStore(qdrant_config=None)
 
     def test_init_with_custom_batch_settings(self):
         """Test initialization with custom batch settings."""

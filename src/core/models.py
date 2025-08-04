@@ -40,7 +40,7 @@ class MergeStrategy(str, Enum):
 class EmbeddingRequest(BaseModel):
     """Request model for embedding operations."""
 
-    texts: List[str] = Field(..., min_items=1, max_items=100)
+    texts: List[str] = Field(..., min_length=1, max_length=100)
     model: EmbeddingModel = Field(default=EmbeddingModel.JINA_V3)
 
     @field_validator("texts")
@@ -66,7 +66,7 @@ class EmbeddingRequest(BaseModel):
 class EmbeddingResponse(BaseModel):
     """Response model for embedding operations."""
 
-    embeddings: List[List[float]] = Field(..., min_items=1)
+    embeddings: List[List[float]] = Field(..., min_length=1)
     model: str = Field(...)
     dimension: int = Field(..., gt=0)
 
@@ -94,7 +94,7 @@ class RerankerRequest(BaseModel):
     """Request model for reranking operations."""
 
     query: str = Field(..., min_length=1, max_length=1000)
-    documents: List[str] = Field(..., min_items=1, max_items=1000)
+    documents: List[str] = Field(..., min_length=1, max_length=1000)
     model: RerankerModel = Field(default=RerankerModel.JINA_M0)
     top_n: int = Field(default=25, ge=1, le=1000)
 
@@ -148,7 +148,7 @@ class SearchRequest(BaseModel):
 
     query: str = Field(..., min_length=1, max_length=500)
     limit: int = Field(default=10, ge=1, le=100)
-    filter_tags: Optional[List[str]] = Field(None, max_items=20)
+    filter_tags: Optional[List[str]] = Field(None, max_length=20)
     bm25_weight: Optional[float] = Field(default=0.4, ge=0.0, le=1.0)
     vector_weight: Optional[float] = Field(default=0.6, ge=0.0, le=1.0)
     bm25_variant: BM25Variant = Field(default=BM25Variant.PLUS)
@@ -215,7 +215,7 @@ class RepositoryData(BaseModel):
     repo_url: str = Field(...)
     summary: Optional[str] = Field(None, max_length=2000)
     description: Optional[str] = Field(None, max_length=1000)
-    tags: List[str] = Field(default_factory=list, max_items=20)
+    tags: List[str] = Field(default_factory=list, max_length=20)
     language: Optional[str] = Field(None, max_length=50)
     stars: int = Field(default=0, ge=0)
     forks: int = Field(default=0, ge=0)

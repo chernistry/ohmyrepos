@@ -92,31 +92,60 @@ class TestIntegration:
     @pytest.mark.asyncio
     async def test_collector_with_mock_github(self):
         """Test RepoCollector with mocked GitHub API."""
-        with patch('httpx.AsyncClient') as mock_client:
-            # Mock GitHub API responses
-            mock_response = Mock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = [
-                {
-                    "id": 123456,
-                    "full_name": "test/repo",
-                    "name": "repo",
-                    "description": "Test repository",
-                    "html_url": "https://github.com/test/repo",
-                    "stargazers_count": 50,
-                    "language": "Python"
+        from src.config import GitHubConfig
+        from pydantic import SecretStr
+        
+        # Create a mock response for the user validation call
+        mock_user_response = AsyncMock()
+        mock_user_response.status_code = 200
+        mock_user_response.json.return_value = {"login": "testuser"}
+        
+        # Create a mock response for the starred repos call
+        mock_repos_response = AsyncMock()
+        mock_repos_response.status_code = 200
+        mock_repos_response.json.return_value = [
+            {
+                "id": 123456,
+                "full_name": "test/repo",
+                "name": "repo",
+                "description": "Test repository",
+                "html_url": "https://github.com/test/repo",
+                "stargazers_count": 50,
+                "language": "Python",
+                "topics": [],
+                "updated_at": "2023-01-01T00:00:00Z",
+                "created_at": "2023-01-01T00:00:00Z",
+                "pushed_at": "2023-01-01T00:00:00Z",
+                "default_branch": "main",
+                "owner": {
+                    "login": "test",
+                    "avatar_url": "https://github.com/test.png"
                 }
-            ]
+            }
+        ]
+        
+        # Mock the HTTP client
+        with patch('src.core.collector.httpx.AsyncClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.get.side_effect = [mock_user_response, mock_repos_response]
+            mock_client.aclose = AsyncMock()
+            mock_client_class.return_value = mock_client
             
-            mock_client_instance = AsyncMock()
-            mock_client_instance.get.return_value = mock_response
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
+            github_config = GitHubConfig(
+                username="testuser",
+                token=SecretStr("test_token")
+            )
+            collector = RepoCollector(github_config=github_config)
+            await collector.initialize()
             
-            collector = RepoCollector(github_token="test_token")
-            repos = await collector.collect_starred_repos("testuser")
+            repos = []
+            async for repo in collector.collect_starred_repos("testuser"):
+                repos.append(repo)
             
             assert len(repos) == 1
-            assert repos[0]["full_name"] == "test/repo"
+            assert repos[0].full_name == "test/repo"
+            
+            await collector.close()
 
     @pytest.mark.asyncio
     async def test_summarizer_with_mock_llm(self, sample_repo_data):

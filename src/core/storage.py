@@ -17,9 +17,14 @@ from tenacity import (
     retry_if_exception_type,
 )
 
-from ..config import QdrantConfig, settings
-from ..core.logging import LoggerMixin, PerformanceLogger, log_exception
-from ..core.models import RepositoryData, SearchResult
+try:
+    from ..config import QdrantConfig, settings
+    from ..core.logging import LoggerMixin, PerformanceLogger, log_exception
+    from ..core.models import RepositoryData, SearchResult
+except ImportError:
+    from src.config import QdrantConfig, settings
+    from src.core.logging import LoggerMixin, PerformanceLogger, log_exception
+    from src.core.models import RepositoryData, SearchResult
 
 
 class StorageError(Exception):
@@ -71,11 +76,15 @@ class QdrantStore(LoggerMixin):
         """
         super().__init__()
         
-        self.config = qdrant_config or settings.qdrant
-        if not self.config:
+        if qdrant_config:
+            self.config = qdrant_config
+        elif settings.qdrant:
+            self.config = settings.qdrant
+        else:
             raise ValueError("Qdrant configuration is required")
         
-        self.collection_name = collection_name
+        # Use config's collection_name if provided, otherwise use parameter
+        self.collection_name = self.config.collection_name or collection_name
         self.batch_size = batch_size
         self.max_concurrent_batches = max_concurrent_batches
         

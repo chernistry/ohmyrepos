@@ -34,7 +34,7 @@ class PromptBuilder:
         # If prompts_dir is not provided, use the default prompts directory
         if prompts_dir is None:
             # Try to find the prompts directory
-            base_dir = settings.BASE_DIR
+            base_dir = settings.base_dir
             self.prompts_dir = base_dir / "prompts"
 
             # If the prompts directory doesn't exist at the base directory,
