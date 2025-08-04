@@ -15,6 +15,8 @@
 | **Interface Layer** | Command-line interface and web-based dashboard |
 | **Intelligence Engine** | Multi-provider LLM integration with semantic understanding and reranking |
 
+![Oh My Repos Dashboard](assets/screenshot.png)
+
 ---
 
 ## Table of Contents
