@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from typing import Any, Dict, Optional
 
 import structlog
+from datetime import datetime, timezone
 from structlog.typing import FilteringBoundLogger
 
 
@@ -31,9 +32,10 @@ def add_request_context(logger: FilteringBoundLogger, method_name: str, event_di
 def add_timestamp(logger: FilteringBoundLogger, method_name: str, event_dict: Dict[str, Any]) -> Dict[str, Any]:
     """Add ISO timestamp to log events."""
     event_dict["timestamp"] = time.time()
-    event_dict["iso_timestamp"] = structlog.stdlib.get_logger().handlers[0].formatter.formatTime(
-        logging.LogRecord("", 0, "", 0, "", (), None), "%Y-%m-%dT%H:%M:%S.%fZ"
-    ) if hasattr(structlog.stdlib.get_logger(), 'handlers') and structlog.stdlib.get_logger().handlers else None
+    # Use stable UTC ISO format independent of handler state
+    event_dict["iso_timestamp"] = datetime.now(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%S.%fZ"
+    )
     return event_dict
 
 

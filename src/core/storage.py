@@ -539,8 +539,15 @@ class QdrantStore(LoggerMixin):
             self._update_response_time(time.time() - start_time)
 
             self.logger.debug(
-                f"Vector search completed: {len(search_results)} results, "
-                f"avg_score={sum(r.score for r in search_results) / len(search_results) if search_results else 0:.3f}"
+                (
+                    "Vector search completed: %d results, avg_score=%.3f"
+                ),
+                len(search_results),
+                (
+                    sum(r.get("score", 0.0) for r in search_results) / len(search_results)
+                    if search_results
+                    else 0.0
+                ),
             )
 
             return search_results

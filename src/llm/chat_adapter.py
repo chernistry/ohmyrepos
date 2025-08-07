@@ -80,7 +80,7 @@ class ChatAdapter:
     async def chat_completion(
         self,
         payload: Dict[str, Any],
-    ) -> Dict[str, Any] | AsyncGenerator[str, None]:
+    ) -> Dict[str, Any] | AsyncGenerator[StreamingChunk, None]:
         """Generate a chat completion.
 
         Args:
@@ -111,7 +111,6 @@ class ChatAdapter:
             presence_penalty=payload.get("presence_penalty", 0.0),
             stop=payload.get("stop"),
             stream=payload.get("stream", False),
-            n=payload.get("n", 1)
         )
 
         result = await self._provider.chat_completion(request)

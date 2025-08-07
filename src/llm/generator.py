@@ -169,7 +169,7 @@ class LLMGenerator:
             return ""
 
     async def _stream_content(
-        self, stream_gen: AsyncGenerator[str, None]
+        self, stream_gen: AsyncGenerator[Any, None]
     ) -> AsyncGenerator[str, None]:
         """Process streaming content.
 
@@ -181,17 +181,27 @@ class LLMGenerator:
         """
         async for chunk in stream_gen:
             try:
-                # Extract content from chunk if it's a data line
-                if chunk.startswith("data: "):
-                    data = chunk[6:].strip()
-                    if data and data != "[DONE]":
-                        data_json = json.loads(data)
-                        delta = data_json["choices"][0]["delta"]
-                        if "content" in delta:
-                            yield delta["content"]
-                # If it's not a data line but has content, yield as is
-                elif chunk.strip():
-                    yield chunk
+                # Handle strongly-typed streaming chunks
+                if isinstance(chunk, dict):
+                    choices = chunk.get("choices", [])
+                    if choices:
+                        delta = choices[0].get("delta", {})
+                        content = delta.get("content")
+                        if content:
+                            yield content
+                    continue
+
+                # Fallback: raw SSE line strings
+                if isinstance(chunk, str):
+                    if chunk.startswith("data: "):
+                        data = chunk[6:].strip()
+                        if data and data != "[DONE]":
+                            data_json = json.loads(data)
+                            delta = data_json["choices"][0]["delta"]
+                            if "content" in delta:
+                                yield delta["content"]
+                    elif chunk.strip():
+                        yield chunk
             except Exception as e:
                 logger.error(f"Error processing stream chunk: {e}")
                 if self.debug:

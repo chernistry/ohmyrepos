@@ -229,10 +229,15 @@ class HybridRetriever:
         try:
             # Здесь запрос пользователя целиком векторизуется через Jina API
             # и затем используется для поиска похожих репозиториев в Qdrant
+            # Normalize tags filter: remove empties and deduplicate
+            norm_tags = None
+            if filter_tags:
+                norm_tags = list(dict.fromkeys([t for t in filter_tags if t]))
+
             results = await self.qdrant_store.search(
-                query=query,  # Текстовый запрос передается в search, где он будет векторизован
+                query=query,
                 limit=limit,
-                filter_tags=filter_tags,
+                filter_tags=norm_tags,
             )
             
             # Логирование для диагностики
@@ -345,7 +350,9 @@ class HybridRetriever:
             ]
 
             scores: Dict[str, Dict[str, Any]] = {}
+            # Track which source contributed each repo to set per-source scores
             vector_names = {r.get("repo_name") for r in vector_results}
+            bm25_names = {r.get("repo_name") for r in bm25_results}
             for lst in ranked_lists:
                 for rank, res in enumerate(lst):
                     rr = 1.0 / (self.rrf_k + rank + 1)
@@ -359,10 +366,25 @@ class HybridRetriever:
                             "bm25_score": 0.0,
                         }
                     scores[repo_name]["score"] += rr
-                    if repo_name in vector_names:
-                        scores[repo_name]["vector_score"] = res["score"]
+                    # Attribute score to the correct source for this entry
+                    if repo_name in vector_names and repo_name not in bm25_names:
+                        scores[repo_name]["vector_score"] = max(
+                            scores[repo_name]["vector_score"], res["score"]
+                        )
+                    elif repo_name in bm25_names and repo_name not in vector_names:
+                        scores[repo_name]["bm25_score"] = max(
+                            scores[repo_name]["bm25_score"], res["score"]
+                        )
                     else:
-                        scores[repo_name]["bm25_score"] = res["score"]
+                        # Present in both lists; preserve max of each seen source
+                        if res in vector_results:
+                            scores[repo_name]["vector_score"] = max(
+                                scores[repo_name]["vector_score"], res["score"]
+                            )
+                        if res in bm25_results:
+                            scores[repo_name]["bm25_score"] = max(
+                                scores[repo_name]["bm25_score"], res["score"]
+                            )
 
             fused = list(scores.values())
             fused.sort(key=lambda x: x["score"], reverse=True)
