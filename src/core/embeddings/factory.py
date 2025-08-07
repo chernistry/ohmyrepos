@@ -48,10 +48,28 @@ class EmbeddingFactory:
         Raises:
             ValueError: If the provider is not supported
         """
-        # Use settings as defaults if not provided
-        model_name = model_name or os.getenv("EMBEDDING_MODEL", "jina-embeddings-v3")
-        api_key = api_key or os.getenv("EMBEDDING_MODEL_API_KEY", "")
-        api_url = api_url or os.getenv("EMBEDDING_MODEL_URL", "https://api.jina.ai/v1/embeddings")
+        # Resolve configuration in priority order: explicit args -> settings -> env
+        if not model_name:
+            if settings.embedding and getattr(settings.embedding, "model", None):
+                model_name = settings.embedding.model
+            else:
+                model_name = os.getenv("EMBEDDING_MODEL", "jina-embeddings-v3")
+
+        if not api_key:
+            if settings.embedding and getattr(settings.embedding, "api_key", None):
+                try:
+                    api_key = settings.embedding.api_key.get_secret_value()
+                except Exception:
+                    api_key = None
+            api_key = api_key or os.getenv("EMBEDDING_MODEL_API_KEY", "")
+
+        if not api_url:
+            if settings.embedding and getattr(settings.embedding, "base_url", None):
+                api_url = str(settings.embedding.base_url)
+            else:
+                api_url = os.getenv(
+                    "EMBEDDING_MODEL_URL", "https://api.jina.ai/v1/embeddings"
+                )
 
         # Find provider class based on model name
         provider_class = None

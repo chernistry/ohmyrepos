@@ -30,8 +30,8 @@ class HybridRetriever:
         self,
         qdrant_store: Optional[QdrantStore] = None,
         repos_json_path: str = "repos.json",
-        bm25_weight: float = 0.3,
-        vector_weight: float = 0.6,
+        bm25_weight: float = 0.5,
+        vector_weight: float = 0.5,
         bm25_variant: str = "plus",
         merge_strategy: str = "rrf",  # 'linear' or 'rrf'
         rrf_k: int = 60,
@@ -71,10 +71,32 @@ class HybridRetriever:
 
     async def initialize(self) -> None:
         """Initialize the retriever by loading repository data and creating BM25 index."""
-        # Initialize Qdrant store if not provided
+        # Initialize Qdrant store only when configured
         if self.qdrant_store is None:
-            self.qdrant_store = QdrantStore()
-            await self.qdrant_store.initialize()
+            try:
+                if settings.qdrant:
+                    self.qdrant_store = QdrantStore()
+                    await self.qdrant_store.initialize()
+                else:
+                    logger.warning(
+                        "Qdrant not configured; vector search will be disabled"
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Qdrant initialization failed (%s); falling back to BM25-only",
+                    e,
+                )
+                self.qdrant_store = None
+        else:
+            # Ensure provided store is initialized
+            try:
+                await self.qdrant_store.initialize()
+            except Exception as e:
+                logger.warning(
+                    "Provided Qdrant store failed to initialize (%s); disabling vector search",
+                    e,
+                )
+                self.qdrant_store = None
 
         # Load repository data for BM25 indexing
         await self._load_repo_data()
@@ -87,8 +109,15 @@ class HybridRetriever:
     async def _load_repo_data(self) -> None:
         """Load repository data from repos.json."""
         if not self.repos_json_path.exists():
-            logger.error(f"Repository data file not found: {self.repos_json_path}")
-            return
+            # Fallback to project root `repos.json`
+            fallback = Path(__file__).resolve().parents[1] / "repos.json"
+            if fallback.exists():
+                self.repos_json_path = fallback
+            else:
+                logger.error(
+                    f"Repository data file not found: {self.repos_json_path}"
+                )
+                return
 
         try:
             with open(self.repos_json_path, "r", encoding="utf-8") as f:
@@ -101,19 +130,28 @@ class HybridRetriever:
             # Prepare corpus for BM25 indexing
             self.repo_corpus = []
             for repo in self.repo_data:
-                # Combine name, description and other relevant fields for indexing
-                text = f"{repo.get('full_name', '')} {repo.get('description', '')} {repo.get('language', '')}"
+                # Combine relevant fields for indexing (robust to schema variants)
+                name = (
+                    repo.get("repo_name")
+                    or repo.get("full_name")
+                    or repo.get("name", "")
+                )
+                description = repo.get("summary") or repo.get("description", "")
+                language = repo.get("language", "")
+                text = f"{name} {description} {language}"
 
                 # Add tags if available
-                if "tags" in repo and isinstance(repo["tags"], list):
-                    text += " " + " ".join(repo["tags"])
+                tags = repo.get("tags") or repo.get("topics", [])
+                if isinstance(tags, list) and tags:
+                    text += " " + " ".join(tags)
 
                 # Add summary if available
-                if "summary" in repo and repo["summary"]:
-                    text += " " + repo["summary"]
+                if repo.get("summary"):
+                    text += " " + str(repo.get("summary"))
 
-                # Tokenize text
-                tokens = text.lower().split()
+                # Tokenize text with regex for better normalization
+                import re
+                tokens = [t for t in re.findall(r"\w+", text.lower()) if t]
                 self.repo_corpus.append(tokens)
 
         except Exception as e:
@@ -185,6 +223,9 @@ class HybridRetriever:
         Returns:
             List of search results with scores
         """
+        if not self.qdrant_store:
+            return []
+
         try:
             # Здесь запрос пользователя целиком векторизуется через Jina API
             # и затем используется для поиска похожих репозиториев в Qdrant
@@ -222,32 +263,50 @@ class HybridRetriever:
         try:
             # Улучшенная токенизация запроса
             import re
-            query_tokens = [token.lower() for token in re.findall(r'\w+', query)]
-            
-            # Добавить поиск по отдельным словам запроса
-            all_scores = np.zeros(len(self.repo_data))
-            for token in query_tokens:
-                token_scores = self.bm25_index.get_scores([token])
-                all_scores += token_scores
-            
+            query_tokens = [t for t in re.findall(r"\w+", query.lower()) if t]
+
+            if not query_tokens:
+                return []
+
+            # Получить BM25-оценки для всего запроса
+            all_scores = self.bm25_index.get_scores(query_tokens)
+
             # Получить топ индексы
             top_indices = np.argsort(all_scores)[::-1][:limit]
-            
-            # Подготовить результаты
-            results = []
+
+            # Подготовить результаты (нормализуем схему полей)
+            results: List[Dict[str, Any]] = []
             for idx in top_indices:
-                if idx < len(self.repo_data) and all_scores[idx] > 0:
+                if idx < len(self.repo_data) and float(all_scores[idx]) > 0.0:
                     repo = self.repo_data[idx]
-                    results.append({
-                        "repo_name": repo.get("full_name", ""),
-                        "repo_url": repo.get("html_url", ""),
-                        "summary": repo.get("description", ""),
-                        "tags": repo.get("tags", []),
-                        "language": repo.get("language"),
-                        "stars": repo.get("stargazers_count", 0),
-                        "score": float(all_scores[idx]),
-                    })
-            
+                    repo_name = (
+                        repo.get("repo_name")
+                        or repo.get("full_name")
+                        or repo.get("name", "")
+                    )
+                    repo_url = (
+                        repo.get("repo_url")
+                        or repo.get("html_url")
+                        or repo.get("url", "")
+                    )
+                    summary = repo.get("summary") or repo.get("description", "")
+                    tags = repo.get("tags") or repo.get("topics", [])
+                    stars = repo.get("stars", repo.get("stargazers_count", 0))
+
+                    results.append(
+                        {
+                            "repo_name": repo_name,
+                            "repo_url": repo_url,
+                            "summary": summary,
+                            "tags": tags if isinstance(tags, list) else [],
+                            "language": repo.get("language"),
+                            "stars": stars,
+                            "score": float(all_scores[idx]),
+                            "bm25_score": float(all_scores[idx]),
+                            "vector_score": 0.0,
+                        }
+                    )
+
             return results
 
         except Exception as e:
@@ -286,6 +345,7 @@ class HybridRetriever:
             ]
 
             scores: Dict[str, Dict[str, Any]] = {}
+            vector_names = {r.get("repo_name") for r in vector_results}
             for lst in ranked_lists:
                 for rank, res in enumerate(lst):
                     rr = 1.0 / (self.rrf_k + rank + 1)
@@ -299,7 +359,7 @@ class HybridRetriever:
                             "bm25_score": 0.0,
                         }
                     scores[repo_name]["score"] += rr
-                    if res in vector_results:
+                    if repo_name in vector_names:
                         scores[repo_name]["vector_score"] = res["score"]
                     else:
                         scores[repo_name]["bm25_score"] = res["score"]

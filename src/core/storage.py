@@ -436,12 +436,21 @@ class QdrantStore(LoggerMixin):
         """
         from src.core.embeddings.factory import EmbeddingFactory
         
-        # Get API key from environment
-        api_key = os.getenv("EMBEDDING_MODEL_API_KEY")
+        # Prefer configured settings; fallback to env
+        api_key = None
+        try:
+            if settings.embedding and settings.embedding.api_key:
+                api_key = settings.embedding.api_key.get_secret_value()
+        except Exception:
+            api_key = None
+        api_key = api_key or os.getenv("EMBEDDING_MODEL_API_KEY")
+
         if not api_key:
-            self.logger.error("EMBEDDING_MODEL_API_KEY environment variable is required for vector search")
+            self.logger.warning(
+                "Embedding API key missing; vector search disabled. Set settings.embedding or EMBEDDING_MODEL_API_KEY."
+            )
             return []
-            
+
         # Create embedding provider
         embedding_provider = EmbeddingFactory.get_provider(api_key=api_key)
         
@@ -708,14 +717,19 @@ class QdrantStore(LoggerMixin):
             existing_repos = set()
             
         # Create embedding provider with API key from environment
-        api_key = os.getenv("EMBEDDING_MODEL_API_KEY")
+        api_key = None
+        try:
+            if settings.embedding and settings.embedding.api_key:
+                api_key = settings.embedding.api_key.get_secret_value()
+        except Exception:
+            api_key = None
+        api_key = api_key or os.getenv("EMBEDDING_MODEL_API_KEY")
         if not api_key:
-            raise ValueError("EMBEDDING_MODEL_API_KEY environment variable is required")
-            
-        self.logger.debug(f"Using API key: {api_key[:5]}...{api_key[-5:]}")
-        embedding_provider = EmbeddingFactory.get_provider(
-            api_key=api_key
-        )
+            raise ValueError(
+                "Embedding API key missing. Configure settings.embedding or EMBEDDING_MODEL_API_KEY."
+            )
+
+        embedding_provider = EmbeddingFactory.get_provider(api_key=api_key)
         
         # Process repositories in batches
         batch_size = self.batch_size
