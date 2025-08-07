@@ -184,7 +184,7 @@ sequenceDiagram
 ### Intelligent Search System
 
 **Hybrid Retrieval Architecture**
-- **Dense Vector Search**: Semantic similarity using Jina embeddings with 768-dimensional vectors
+- **Dense Vector Search**: Semantic similarity using Jina embeddings (v3, 1024-dimensional vectors by default)
 - **Sparse Lexical Search**: BM25/BM25Plus algorithms for exact keyword matching
 - **Reciprocal Rank Fusion**: Mathematically optimal result combination methodology
 - **AI-Powered Reranking**: Jina reranker for semantic relevance refinement
@@ -217,10 +217,10 @@ async with asyncio.Semaphore(max_concurrent):
 ### LLM-Powered Intelligence
 
 **Multi-Provider Support**
-| Provider | Models | Use Case |
-|----------|--------|----------|
-| **OpenAI** | GPT-4, GPT-3.5-turbo | Production summarization |
-| **OpenRouter** | 50+ models | Cost optimization |
+| Provider | Models (examples) | Use Case |
+|----------|-------------------|----------|
+| **OpenAI** | GPT-4, GPT-4o | Production summarization |
+| **OpenRouter** | deepseek, claude, llama families | Cost optimization |
 | **Ollama** | Phi-3.5, Llama-3 | Local/private deployment |
 
 **Intelligent Summarization**
@@ -248,8 +248,8 @@ README: {readme_content}
 - **Debug Mode**: Detailed logging and error tracebacks
 
 **Interactive Web UI**
-- **Real-time Search**: Instant results as you type
-- **Advanced Filtering**: By language, tags, stars, recency
+- **Search**: Execute hybrid search with optional AI reranking
+- **Advanced Filtering**: By language and tags
 - **Result Preview**: Repository cards with summaries
 - **Export Options**: JSON, CSV, Markdown formats
 
@@ -294,23 +294,25 @@ EMBEDDING_MODEL_API_KEY=jina_your_key  # for embeddings
 
 ```bash
 # Full pipeline: collect → summarize → embed → index
-python ohmyrepos.py embed
+python ohmyrepos.py embed \
+  --input repositories.json \  # optional; will collect if omitted
+  --skip-collection            # skip GitHub collection if input provided
 
 # This will:
-# 1. Fetch all your starred repositories (~2-5 min for 1000 repos)
-# 2. Generate AI summaries with concurrency (~10-20 min)  
-# 3. Create vector embeddings (~2-3 min)
-# 4. Build searchable indexes (~30 seconds)
+# 1. Fetch starred repositories (if no --input)
+# 2. Generate AI summaries (concurrency configurable via --concurrency)
+# 3. Create vector embeddings and upsert to Qdrant
+# 4. Build BM25 in-memory index for hybrid search
 ```
 
 ### Search Operations
 
 ```bash
 # CLI search
-python ohmyrepos.py search "machine learning python" --limit 10
+python ohmyrepos.py search "machine learning python" --limit 10 --tag python --tag ml
 
 # Web interface
-python ohmyrepos.py serve --port 8501
+python ohmyrepos.py serve --host localhost --port 8501
 # Visit: http://localhost:8501
 ```
 
@@ -418,61 +420,30 @@ class JinaEmbeddings:
 
 **Search Strategy Implementation**
 ```python
-class HybridRetriever:
-    """Advanced hybrid search with multiple fusion strategies."""
-    
-    async def search(
-        self, 
-        query: str, 
-        limit: int = 25
-    ) -> List[Dict[str, Any]]:
-        """Execute hybrid search with RRF fusion."""
-        
-        # Parallel retrieval
-        vector_task = self.vector_search(query, limit * 2)
-        bm25_task = self.bm25_search(query, limit * 2)
-        
-        vector_results, bm25_results = await asyncio.gather(
-            vector_task, bm25_task
-        )
-        
-        # Reciprocal Rank Fusion
-        fused_results = self._reciprocal_rank_fusion(
-            vector_results, bm25_results, k=60
-        )
-        
-        # AI reranking for semantic relevance
-        if len(fused_results) > limit:
-            fused_results = await self.reranker.rerank(
-                query, fused_results, top_k=limit
-            )
-            
-        return fused_results[:limit]
+async def search(self, query: str, limit: int = 25) -> List[Dict[str, Any]]:
+    """Execute hybrid search with BM25+vector and optional reranking."""
+    vector_results = await self._vector_search(query, limit=limit * 2)
+    bm25_results = await self._bm25_search(query, limit=limit * 2)
+    combined = self._combine_results(vector_results, bm25_results, limit)
+    return combined
 ```
 
 **Fusion Algorithm (RRF)**
 ```python
-def _reciprocal_rank_fusion(
-    self, 
-    results_a: List, 
-    results_b: List, 
-    k: int = 60
-) -> List:
-    """Implement Reciprocal Rank Fusion algorithm."""
-    
-    scores = {}
-    
-    # RRF scoring: 1/(k + rank)
-    for rank, result in enumerate(results_a):
-        repo_id = result['id']
-        scores[repo_id] = scores.get(repo_id, 0) + 1/(k + rank + 1)
-    
-    for rank, result in enumerate(results_b):
-        repo_id = result['id']  
-        scores[repo_id] = scores.get(repo_id, 0) + 1/(k + rank + 1)
-    
-    # Sort by combined RRF score
-    return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+# Inside HybridRetriever._combine_results with merge_strategy == "rrf"
+ranked_lists = [
+    sorted(vector_results, key=lambda x: x["score"], reverse=True),
+    sorted(bm25_results, key=lambda x: x["score"], reverse=True),
+]
+scores: Dict[str, Dict[str, Any]] = {}
+for lst in ranked_lists:
+    for rank, res in enumerate(lst):
+        rr = 1.0 / (self.rrf_k + rank + 1)
+        repo_name = res["repo_name"]
+        if repo_name not in scores:
+            scores[repo_name] = {**res, "score": 0.0, "vector_score": 0.0, "bm25_score": 0.0}
+        scores[repo_name]["score"] += rr
+return sorted(scores.values(), key=lambda x: x["score"], reverse=True)[:limit]
 ```
 
 ---
@@ -484,16 +455,16 @@ def _reciprocal_rank_fusion(
 #### Repository Processing
 ```bash
 # Collect starred repositories
-python ohmyrepos.py collect --output repos.json
+python ohmyrepos.py collect --output repositories.json
 
-# Generate summaries (with concurrency)
-python ohmyrepos.py summarize repos.json --concurrency 4 --output summaries.json
+# Generate summaries (with concurrency and incremental save)
+python ohmyrepos.py summarize repositories.json --concurrency 4 --output summaries.json
 
 # Full pipeline with incremental saves
-python ohmyrepos.py embed --incremental-save --concurrency 4
+python ohmyrepos.py embed --incremental-save --concurrency 4 --output enriched_repos.json
 
 # Generate embeddings only (skip collection/summarization)
-python ohmyrepos.py embed-only --input summaries.json
+python ohmyrepos.py embed-only --input summaries.json --output enriched_repos.json
 ```
 
 #### Search Operations
@@ -511,7 +482,7 @@ python ohmyrepos.py search "data science" --output results.json
 #### Interface Management
 ```bash
 # Launch web UI
-python ohmyrepos.py serve --host 0.0.0.0 --port 8080
+python ohmyrepos.py serve --host 0.0.0.0 --port 8501
 
 # Debug specific repository
 python ohmyrepos.py generate-summary --name "fastapi/fastapi" --debug
@@ -559,8 +530,8 @@ VECTOR_WEIGHT=0.6                    # 0.0 to 1.0
 | **Collection** (1000 repos) | 3-5 min | N/A | 2-3 min |
 | **Summarization** (1000 repos) | 15-25 min | N/A | 8-12 min |
 | **Embedding** (1000 repos) | 3-5 min | N/A | 2-3 min |
-| **Search Query** | 200-500ms | 50-150ms | N/A |
-| **Reranking** (25 results) | 800-1200ms | 400-600ms | N/A |
+| **Search Query (hybrid)** | 200-600ms | 80-200ms | N/A |
+| **Reranking** (25 results) | 800-1500ms | 500-800ms | N/A |
 
 ---
 
@@ -575,6 +546,10 @@ CHAT_LLM_PROVIDER=openai
 CHAT_LLM_BASE_URL=https://api.openai.com/v1
 CHAT_LLM_MODEL=gpt-4-turbo
 CHAT_LLM_API_KEY=sk-your-openai-key
+
+# Alternatively via OpenRouter (OpenAI-compatible)
+# CHAT_LLM_BASE_URL=https://openrouter.ai/api/v1
+# CHAT_LLM_MODEL=deepseek/deepseek-r1-0528:free
 ```
 
 #### OpenRouter (Cost Optimization)
@@ -604,7 +579,7 @@ ollama pull phi3.5:3.8b
 #### Qdrant Cloud (Recommended)
 ```bash
 # Managed service with generous free tier
-QDRANT_URL=https://your-cluster.qdrant.cloud:6333
+QDRANT_URL=https://your-cluster.qdrant.cloud
 QDRANT_API_KEY=your-api-key
 ```
 
@@ -918,9 +893,8 @@ COPY ohmyrepos.py .
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8501/health')"
+# Optionally expose Streamlit port
+EXPOSE 8501
 
 CMD ["python", "ohmyrepos.py", "serve", "--host", "0.0.0.0", "--port", "8501"]
 ```
