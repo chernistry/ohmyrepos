@@ -17,6 +17,10 @@ rank-bm25
 aiohttp
 nest-asyncio
 
+# FastAPI and server
+fastapi
+uvicorn[standard]
+
 # Security and secrets management
 cryptography
 keyring
