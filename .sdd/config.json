@@ -1,0 +1,6 @@
+{
+  "project_name": "ohmyrepos",
+  "tech_stack": "Python/FastAPI backend + Next.js frontend + Qdrant",
+  "domain": "LLM-powered semantic search over GitHub repositories",
+  "year": "2025"
+}
