@@ -3,6 +3,7 @@
 import logging
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+from datetime import datetime
 import httpx
 
 from src.core.summarizer import RepoSummarizer
@@ -27,14 +28,55 @@ class IngestionPipeline:
         """Initialize the pipeline."""
         await self.qdrant_store.initialize()
 
-    async def ingest_repo(self, repo_url: str) -> Dict[str, Any]:
+    async def should_reindex(self, repo_id: str, github_pushed_at: str) -> bool:
+        """Check if repository needs reindexing.
+        
+        Args:
+            repo_id: Repository ID (owner/name)
+            github_pushed_at: Last push timestamp from GitHub
+            
+        Returns:
+            True if reindexing is needed
+        """
+        try:
+            # Retrieve existing point
+            # Note: This assumes QdrantStore has a method to get a point by ID
+            # If not, we might need to add it or use search with filter
+            # For now, we'll assume we can search by ID
+            points = await self.qdrant_store.client.retrieve(
+                collection_name=self.qdrant_store.collection_name,
+                ids=[self.qdrant_store._generate_id(repo_id)]
+            )
+            
+            if not points:
+                return True
+                
+            payload = points[0].payload
+            stored_pushed_at = payload.get("last_pushed_at")
+            
+            if not stored_pushed_at:
+                return True
+                
+            # Compare dates
+            # GitHub format: 2011-01-26T19:01:12Z
+            gh_date = datetime.fromisoformat(github_pushed_at.replace("Z", "+00:00"))
+            stored_date = datetime.fromisoformat(stored_pushed_at.replace("Z", "+00:00"))
+            
+            return gh_date > stored_date
+            
+        except Exception as e:
+            logger.warning(f"Error checking reindex status for {repo_id}: {e}")
+            return True
+
+    async def ingest_repo(self, repo_url: str, force: bool = False) -> Optional[Dict[str, Any]]:
         """Ingest a single repository.
 
         Args:
             repo_url: GitHub repository URL (e.g., https://github.com/owner/repo)
+            force: Force reindexing even if up to date
 
         Returns:
-            Ingested repository data
+            Ingested repository data or None if skipped
         """
         logger.info(f"Ingesting repository: {repo_url}")
 
@@ -47,6 +89,11 @@ class IngestionPipeline:
 
         # Fetch metadata from GitHub API
         repo_data = await self._fetch_repo_metadata(full_name)
+        
+        # Check if we need to reindex
+        if not force and not await self.should_reindex(full_name, repo_data["updated_at"]):
+            logger.info(f"Skipping {full_name} (up to date)")
+            return None
 
         # Fetch README
         readme = await self._fetch_readme(full_name)
@@ -54,6 +101,10 @@ class IngestionPipeline:
 
         # Summarize
         enriched = await self.summarizer.summarize(repo_data)
+        
+        # Add tracking metadata
+        enriched["last_pushed_at"] = repo_data["updated_at"]
+        enriched["last_indexed_at"] = datetime.utcnow().isoformat() + "Z"
 
         # Store in Qdrant
         await self.qdrant_store.store_repositories([enriched])
@@ -86,7 +137,8 @@ class IngestionPipeline:
                 "language": data.get("language"),
                 "topics": data.get("topics", []),
                 "created_at": data["created_at"],
-                "updated_at": data["updated_at"],
+                "updated_at": data["updated_at"], # This is usually pushed_at or updated_at
+                "pushed_at": data.get("pushed_at"), # Prefer pushed_at for code changes
             }
 
     async def _fetch_readme(self, full_name: str) -> str:

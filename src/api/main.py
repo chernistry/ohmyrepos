@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.exceptions import generic_exception_handler, validation_exception_handler
 from src.api.middleware import LoggingMiddleware
-from src.api.routers import health, search
+from src.api.routers import health, search, ingest, chat
 from src.config import settings
 
 # Configure structured logging
@@ -64,3 +64,5 @@ app.add_exception_handler(Exception, generic_exception_handler)
 # Routers
 app.include_router(health.router, tags=["health"])
 app.include_router(search.router, prefix="/api/v1", tags=["search"])
+app.include_router(ingest.router, prefix="/api/v1", tags=["ingestion"])
+app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
