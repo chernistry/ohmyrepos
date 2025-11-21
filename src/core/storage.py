@@ -228,18 +228,6 @@ class QdrantStore(LoggerMixin):
                                 self.config.distance_metric.upper()
                             ),
                         ),
-                        optimizers_config=qdrant_models.OptimizersConfig(
-                            default_segment_number=2,
-                            max_segment_size=20000,
-                            deleted_threshold=0.2,
-                            vacuum_min_vector_number=1000,
-                            flush_interval_sec=5,
-                        ),
-                        hnsw_config=qdrant_models.HnswConfig(
-                            m=16,
-                            ef_construct=100,
-                            full_scan_threshold=10000,
-                        ),
                     )
 
                     # Create payload indexes for efficient filtering

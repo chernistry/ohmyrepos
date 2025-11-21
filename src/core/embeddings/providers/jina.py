@@ -72,7 +72,7 @@ class JinaEmbeddingProvider(EmbeddingProvider):
             max_keepalive_connections=20, max_connections=100, keepalive_expiry=30.0
         )
 
-        timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
+        timeout = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=5.0)
 
         self.client = httpx.AsyncClient(
             timeout=timeout,

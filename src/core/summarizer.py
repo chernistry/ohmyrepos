@@ -111,6 +111,13 @@ class RepoSummarizer:
                     "summary": result.get("summary", "No summary generated"),
                     "tags": result.get("tags", []),
                 }
+            
+            # Clean tags: remove empty, whitespace-only, and duplicates
+            if "tags" in result and isinstance(result["tags"], list):
+                result["tags"] = list(dict.fromkeys([
+                    tag.strip() for tag in result["tags"] 
+                    if isinstance(tag, str) and tag.strip()
+                ]))
 
             # Add original repo data
             result["repo_name"] = repo_data.get("name", "")

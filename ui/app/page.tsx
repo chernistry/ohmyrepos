@@ -1,62 +1,29 @@
 'use client';
-
 import { useState } from 'react';
-import SearchBar from '@/components/SearchBar';
-import SearchResults from '@/components/SearchResults';
-import { searchRepos, RepoResult } from '@/lib/api';
+import { SearchInput } from '@/components/SearchInput';
+import { RepoGrid } from '@/components/RepoGrid';
+import { useDebounce } from '@/hooks/useDebounce';
 
-export default function Home() {
-  const [results, setResults] = useState<RepoResult[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lastQuery, setLastQuery] = useState('');
-
-  const handleSearch = async (query: string) => {
-    setIsLoading(true);
-    setError(null);
-    setLastQuery(query);
-
-    try {
-      const response = await searchRepos(query);
-      setResults(response.results);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Search failed');
-      setResults([]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+export default function SearchPage() {
+  const [query, setQuery] = useState('');
+  const debouncedQuery = useDebounce(query, 300);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <main className="container mx-auto px-4 py-8">
-        <div className="flex flex-col items-center gap-8">
-          <div className="text-center">
-            <h1 className="text-4xl font-bold text-gray-900 mb-2">
-              Oh My Repos
-            </h1>
-            <p className="text-gray-600">
-              Semantic search for GitHub repositories
-            </p>
-          </div>
+    <div className="p-8 max-w-7xl mx-auto space-y-12">
+      <header className="space-y-4 text-center mt-10">
+        <h1 className="text-4xl font-bold tracking-tight text-primary bg-gradient-to-b from-white to-white/60 bg-clip-text text-transparent">
+          Discover
+        </h1>
+        <p className="text-secondary max-w-lg mx-auto text-lg">
+          Search across your knowledge base with semantic understanding.
+        </p>
+      </header>
 
-          <SearchBar onSearch={handleSearch} isLoading={isLoading} />
+      <div className="sticky top-4 z-10">
+        <SearchInput value={query} onChange={setQuery} />
+      </div>
 
-          {error && (
-            <div className="w-full max-w-3xl p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-              {error}
-            </div>
-          )}
-
-          {!isLoading && lastQuery && (
-            <SearchResults results={results} query={lastQuery} />
-          )}
-
-          {isLoading && (
-            <div className="text-gray-500">Searching...</div>
-          )}
-        </div>
-      </main>
+      <RepoGrid query={debouncedQuery} />
     </div>
   );
 }
