@@ -1083,26 +1083,34 @@ def reindex(
         readable=True,
         help="Path to JSON file with repository data",
     ),
+    incremental: bool = typer.Option(
+        False,
+        "--incremental",
+        "-i",
+        help="Only index repositories not already in Qdrant",
+    ),
 ):
     """Reindex repositories from a JSON file into Qdrant.
 
-    Example:
+    Examples:
         ohmyrepos reindex repos.json
+        ohmyrepos reindex repos.json --incremental
     """
 
     async def reindex_async():
         pipeline = IngestionPipeline()
         try:
             await pipeline.initialize()
-            results = await pipeline.reindex(repos_file)
+            results = await pipeline.reindex(repos_file, incremental=incremental)
             return results
         finally:
             await pipeline.close()
 
     try:
-        console.print(f"Reindexing from: [bold]{repos_file}[/bold]")
+        mode = "incrementally" if incremental else "fully"
+        console.print(f"Reindexing {mode} from: [bold]{repos_file}[/bold]")
 
-        with console.status("[bold green]Reindexing repositories..."):
+        with console.status(f"[bold green]Reindexing repositories {mode}..."):
             results = asyncio.run(reindex_async())
 
         console.print(f"[green]✓[/green] Successfully reindexed [bold]{len(results)}[/bold] repositories")

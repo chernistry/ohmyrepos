@@ -159,11 +159,12 @@ class IngestionPipeline:
             response.raise_for_status()
             return response.text
 
-    async def reindex(self, repos_file: Path) -> List[Dict[str, Any]]:
+    async def reindex(self, repos_file: Path, incremental: bool = False) -> List[Dict[str, Any]]:
         """Reindex repositories from a JSON file.
 
         Args:
             repos_file: Path to repos.json file
+            incremental: If True, only index repos not already in Qdrant
 
         Returns:
             List of ingested repositories
@@ -178,6 +179,17 @@ class IngestionPipeline:
             repos = [repos]
 
         logger.info(f"Found {len(repos)} repositories to reindex")
+
+        # Filter out existing repos if incremental
+        if incremental:
+            existing = await self.qdrant_store.get_existing_repositories()
+            existing_names = set(existing)
+            repos = [r for r in repos if r.get("full_name") not in existing_names]
+            logger.info(f"Incremental mode: {len(repos)} new repositories to index")
+
+        if not repos:
+            logger.info("No new repositories to index")
+            return []
 
         # Summarize if needed
         repos_to_store = []
