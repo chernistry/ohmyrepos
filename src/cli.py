@@ -18,6 +18,7 @@ from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
 from src.core.collector import RepoCollector
 from src.core.storage import QdrantStore
 from src.core.summarizer import RepoSummarizer
+from src.ingestion.pipeline import IngestionPipeline
 
 # Configure logging
 logging.basicConfig(
@@ -1030,6 +1031,84 @@ def search(
 
     except Exception as e:
         logger.error(f"Error: {e}")
+        sys.exit(1)
+
+
+@app.command()
+def ingest(
+    repo_url: str = typer.Argument(..., help="GitHub repository URL"),
+    output_file: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Path to save ingested repository data"
+    ),
+):
+    """Ingest a single GitHub repository into Qdrant.
+
+    Example:
+        ohmyrepos ingest https://github.com/owner/repo
+    """
+
+    async def ingest_async():
+        pipeline = IngestionPipeline()
+        try:
+            await pipeline.initialize()
+            result = await pipeline.ingest_repo(repo_url)
+            return result
+        finally:
+            await pipeline.close()
+
+    try:
+        console.print(f"Ingesting repository: [bold]{repo_url}[/bold]")
+
+        with console.status("[bold green]Ingesting repository..."):
+            result = asyncio.run(ingest_async())
+
+        console.print(f"[green]✓[/green] Successfully ingested: [bold]{result['full_name']}[/bold]")
+
+        if output_file:
+            output_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+            console.print(f"Data saved to [bold]{output_file}[/bold]")
+
+    except Exception as e:
+        logger.error(f"Ingestion failed: {e}")
+        sys.exit(1)
+
+
+@app.command()
+def reindex(
+    repos_file: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="Path to JSON file with repository data",
+    ),
+):
+    """Reindex repositories from a JSON file into Qdrant.
+
+    Example:
+        ohmyrepos reindex repos.json
+    """
+
+    async def reindex_async():
+        pipeline = IngestionPipeline()
+        try:
+            await pipeline.initialize()
+            results = await pipeline.reindex(repos_file)
+            return results
+        finally:
+            await pipeline.close()
+
+    try:
+        console.print(f"Reindexing from: [bold]{repos_file}[/bold]")
+
+        with console.status("[bold green]Reindexing repositories..."):
+            results = asyncio.run(reindex_async())
+
+        console.print(f"[green]✓[/green] Successfully reindexed [bold]{len(results)}[/bold] repositories")
+
+    except Exception as e:
+        logger.error(f"Reindexing failed: {e}")
         sys.exit(1)
 
 
