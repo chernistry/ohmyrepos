@@ -178,14 +178,18 @@ class IngestionPipeline:
         if not isinstance(repos, list):
             repos = [repos]
 
-        logger.info(f"Found {len(repos)} repositories to reindex")
+        total_loaded = len(repos)
+        logger.info(f"Loaded {total_loaded} repositories from file")
 
         # Filter out existing repos if incremental
         if incremental:
+            logger.info("Checking existing repositories in Qdrant...")
             existing = await self.qdrant_store.get_existing_repositories()
             existing_names = set(existing)
+            logger.info(f"Found {len(existing_names)} existing repositories in Qdrant")
+            
             repos = [r for r in repos if r.get("full_name") not in existing_names]
-            logger.info(f"Incremental mode: {len(repos)} new repositories to index")
+            logger.info(f"Filtered to {len(repos)} new repositories (skipped {total_loaded - len(repos)} existing)")
 
         if not repos:
             logger.info("No new repositories to index")
@@ -193,17 +197,25 @@ class IngestionPipeline:
 
         # Summarize if needed
         repos_to_store = []
-        for repo in repos:
+        total_to_process = len(repos)
+        
+        for idx, repo in enumerate(repos, 1):
+            repo_name = repo.get("full_name", "unknown")
+            logger.info(f"Processing {idx}/{total_to_process}: {repo_name}")
+            
             if "summary" not in repo or not repo["summary"]:
+                logger.info(f"  → Generating summary for {repo_name}")
                 enriched = await self.summarizer.summarize(repo)
                 repos_to_store.append(enriched)
             else:
+                logger.info(f"  → Using existing summary for {repo_name}")
                 repos_to_store.append(repo)
 
         # Store in Qdrant
+        logger.info(f"Storing {len(repos_to_store)} repositories in Qdrant...")
         await self.qdrant_store.store_repositories(repos_to_store)
 
-        logger.info(f"Successfully reindexed {len(repos_to_store)} repositories")
+        logger.info(f"✓ Successfully indexed {len(repos_to_store)} repositories")
         return repos_to_store
 
     async def close(self):
