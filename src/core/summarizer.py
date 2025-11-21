@@ -112,12 +112,13 @@ class RepoSummarizer:
                     "tags": result.get("tags", []),
                 }
             
-            # Clean tags: remove empty, whitespace-only, and duplicates
+            # Clean tags: remove empty, whitespace-only, and duplicates, limit to 20
             if "tags" in result and isinstance(result["tags"], list):
-                result["tags"] = list(dict.fromkeys([
+                cleaned_tags = list(dict.fromkeys([
                     tag.strip() for tag in result["tags"] 
                     if isinstance(tag, str) and tag.strip()
                 ]))
+                result["tags"] = cleaned_tags[:20]  # Limit to max 20 tags
 
             # Add original repo data
             result["repo_name"] = repo_data.get("name", "")
