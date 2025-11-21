@@ -2,9 +2,12 @@
 
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from src.api.budget import get_budget_tracker
+from src.api.rate_limit import rate_limit_dependency
+from src.api.utils import estimate_tokens, log_token_usage
 from src.config import settings
 from src.core.retriever import HybridRetriever
 from src.core.storage import QdrantStore
@@ -43,13 +46,36 @@ class SearchResponse(BaseModel):
     total: int
 
 
-@router.post("/search", response_model=SearchResponse, status_code=status.HTTP_200_OK)
+@router.post(
+    "/search",
+    response_model=SearchResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(lambda req: rate_limit_dependency(req, limit=60, window=60))],
+)
 async def search(request: SearchRequest):
-    """Search repositories using hybrid retrieval."""
+    """Search repositories using hybrid retrieval.
+    
+    Rate limit: 60 requests per minute per IP.
+    """
     if not settings.qdrant:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Search service not configured",
+        )
+
+    # Estimate tokens for budget tracking
+    query_tokens = estimate_tokens(request.query)
+    
+    # Check budget
+    budget_tracker = get_budget_tracker()
+    if not budget_tracker.check_budget(query_tokens):
+        remaining = budget_tracker.get_remaining()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "code": "budget_exceeded",
+                "message": f"Daily token budget exceeded. Remaining: {remaining}",
+            },
         )
 
     try:
@@ -69,6 +95,10 @@ async def search(request: SearchRequest):
             limit=request.limit,
             filter_tags=request.filter_tags,
         )
+
+        # Log token usage
+        log_token_usage("search", query_tokens)
+        budget_tracker.add_usage(query_tokens)
 
         # Convert to response model
         repo_results = [
