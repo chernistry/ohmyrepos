@@ -6,7 +6,7 @@ which uses an LLM to generate repository summaries.
 
 import json
 import logging
-from typing import Dict, Optional, Any, Union, AsyncGenerator
+from typing import Dict, Optional, Any, Union, AsyncGenerator, List
 
 from src.llm.chat_adapter import ChatAdapter
 from src.llm.prompt_builder import PromptBuilder
@@ -49,30 +49,49 @@ class LLMGenerator:
     async def generate(
         self,
         prompt: str,
+        context: Optional[str] = None,
+        history: Optional[List[Dict[str, str]]] = None,
         stream: bool = False,
     ) -> Union[str, AsyncGenerator[str, None]]:
         """Generate a response based on the prompt.
 
         Args:
-            prompt: Prompt text
+            prompt: Prompt text (user question)
+            context: Optional RAG context
+            history: Optional chat history (list of dicts with role and content)
             stream: Whether to stream the response
 
         Returns:
             Generated response text or streaming generator
         """
-        # Build prompt
-        system_message = self.prompt_builder.build_system_message()
+        # Build system message
+        if context:
+            system_message = self.prompt_builder.build_rag_system_message()
+        else:
+            system_message = self.prompt_builder.build_system_message()
 
         # Log system message for debugging
         if self.debug:
             logger.debug(f"System message: {system_message}")
 
+        # Prepare messages list
+        messages = [{"role": "system", "content": system_message}]
+        
+        # Add history if provided
+        if history:
+            messages.extend(history)
+            
+        # Prepare user content
+        if context:
+            user_content = self.prompt_builder.build_rag_user_prompt(prompt, context)
+        else:
+            user_content = prompt
+            
+        messages.append({"role": "user", "content": user_content})
+
         # Prepare payload
         payload = {
-            "messages": [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt},
-            ],
+            "messages": messages,
             "temperature": 0.2,  # Lower temperature for more deterministic outputs
             "max_tokens": self.max_tokens,
             "stream": stream,
@@ -179,7 +198,10 @@ class LLMGenerator:
         Yields:
             Processed content chunks
         """
+        logger.debug("Starting stream processing")
+        chunk_count = 0
         async for chunk in stream_gen:
+            chunk_count += 1
             try:
                 # Handle strongly-typed streaming chunks
                 if isinstance(chunk, dict):
@@ -188,6 +210,7 @@ class LLMGenerator:
                         delta = choices[0].get("delta", {})
                         content = delta.get("content")
                         if content:
+                            logger.debug(f"Yielding content chunk {chunk_count}: {len(content)} chars")
                             yield content
                     continue
 
@@ -207,3 +230,4 @@ class LLMGenerator:
                 if self.debug:
                     logger.debug(f"Raw chunk: {chunk}")
                 continue
+        logger.debug(f"Stream processing complete. Total chunks: {chunk_count}")

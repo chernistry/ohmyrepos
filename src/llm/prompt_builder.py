@@ -88,3 +88,35 @@ class PromptBuilder:
         )
 
         return prompt
+
+    def build_rag_system_message(self) -> str:
+        """Build a system message for RAG-based chat.
+
+        Returns:
+            System message text
+        """
+        return (
+            "You are a helpful AI assistant for the 'Oh My Repos' application. "
+            "You have access to the user's software repositories and can answer questions about them. "
+            "Use the provided context from the repositories to answer the user's questions accurately. "
+            "If the answer cannot be found in the context, admit it and try to be helpful based on general knowledge, "
+            "but clearly distinguish between what is in the context and what is general knowledge. "
+            "Provide code snippets when relevant. "
+            "Keep responses concise and to the point."
+        )
+
+    def build_rag_user_prompt(self, question: str, context: str) -> str:
+        """Build a user prompt with context for RAG.
+
+        Args:
+            question: User's question
+            context: Retrieved context from repositories
+
+        Returns:
+            Prompt text with context
+        """
+        return (
+            f"Context from repositories:\n{context}\n\n"
+            f"User Question: {question}\n\n"
+            "Answer the question based on the context provided above."
+        )

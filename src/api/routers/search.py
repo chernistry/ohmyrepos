@@ -2,7 +2,7 @@
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from src.api.budget import get_budget_tracker
@@ -50,13 +50,17 @@ class SearchResponse(BaseModel):
     "/search",
     response_model=SearchResponse,
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(lambda req: rate_limit_dependency(req, limit=60, window=60))],
 )
-async def search(request: SearchRequest):
+async def search(request: SearchRequest, req: Request = None):
     """Search repositories using hybrid retrieval.
     
     Rate limit: 60 requests per minute per IP.
     """
+    # Apply rate limiting
+    if req:
+        from src.api.rate_limit import rate_limit_dependency
+        await rate_limit_dependency(req, limit=60, window=60)
+    
     if not settings.qdrant:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

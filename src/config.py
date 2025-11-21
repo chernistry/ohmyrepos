@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Union
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
 from pydantic import (
     BaseModel,
     Field,
@@ -20,6 +21,9 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Load .env file explicitly before Settings initialization
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 
 class Environment(str, Enum):
@@ -236,7 +240,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_API_KEY: Optional[str] = Field(default=None, exclude=True)
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(Path(__file__).parent.parent / ".env"),
         env_file_encoding="utf-8",
         env_nested_delimiter="__",
         case_sensitive=False,

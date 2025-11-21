@@ -6,7 +6,13 @@ interface SearchInputProps {
     onChange: (value: string) => void;
 }
 
-export function SearchInput({ value, onChange }: SearchInputProps) {
+export function SearchInput({ value, onChange, onSubmit }: SearchInputProps & { onSubmit?: () => void }) {
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' && onSubmit) {
+            onSubmit();
+        }
+    };
+
     return (
         <div className="relative group max-w-2xl mx-auto">
             <div className="absolute inset-0 bg-accent/20 rounded-xl blur-xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-500" />
@@ -18,7 +24,8 @@ export function SearchInput({ value, onChange }: SearchInputProps) {
                     type="text"
                     value={value}
                     onChange={(e) => onChange(e.target.value)}
-                    placeholder="Search repositories..."
+                    onKeyDown={handleKeyDown}
+                    placeholder="Search repositories or ask AI..."
                     className="w-full bg-transparent border-none py-4 px-3 text-lg text-primary placeholder:text-secondary/50 focus:outline-none focus:ring-0"
                     autoFocus
                 />

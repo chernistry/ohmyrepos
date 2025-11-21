@@ -8,8 +8,14 @@ import { Robot } from '@phosphor-icons/react';
 
 export default function SearchPage() {
   const [query, setQuery] = useState('');
-  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatQuery, setChatQuery] = useState<string | undefined>(undefined);
   const debouncedQuery = useDebounce(query, 300);
+
+  const handleSearchSubmit = () => {
+    if (query.trim()) {
+      setChatQuery(query);
+    }
+  };
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-12 relative">
@@ -24,20 +30,25 @@ export default function SearchPage() {
 
       <div className="sticky top-4 z-10 flex justify-center gap-4">
         <div className="flex-1 max-w-2xl">
-          <SearchInput value={query} onChange={setQuery} />
+          <SearchInput
+            value={query}
+            onChange={(v) => {
+              setQuery(v);
+              // If user clears input, maybe clear chat query? 
+              // Or keep it? Let's keep it for now.
+            }}
+            onSubmit={handleSearchSubmit}
+          />
         </div>
-        <button
-          onClick={() => setIsChatOpen(!isChatOpen)}
-          className="h-[58px] px-4 bg-surface border border-border rounded-xl hover:border-accent/50 hover:text-accent transition-colors flex items-center gap-2 group"
-        >
-          <Robot size={24} weight="duotone" className="group-hover:animate-bounce" />
-          <span className="font-medium hidden sm:inline">Ask AI</span>
-        </button>
       </div>
 
-      <RepoGrid query={debouncedQuery} />
+      {chatQuery && (
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <ChatInterface initialQuery={chatQuery} />
+        </div>
+      )}
 
-      <ChatInterface isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
+      <RepoGrid query={debouncedQuery} />
     </div>
   );
 }

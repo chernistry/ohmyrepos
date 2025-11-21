@@ -200,7 +200,21 @@ class OpenAIProvider(BaseLLMProvider):
             async with self._client.stream(
                 "POST", "/chat/completions", json=payload
             ) as response:
-                await self._handle_response_errors(response)
+                # Check status code before reading stream
+                if not response.is_success:
+                    error_text = await response.aread()
+                    try:
+                        error_data = json.loads(error_text)
+                        error_message = error_data.get("error", {}).get("message", "Unknown error")
+                    except:
+                        error_message = f"HTTP {response.status_code}: {error_text.decode()}"
+                    
+                    if response.status_code == 401:
+                        raise AuthenticationError(error_message, response.status_code)
+                    elif response.status_code == 429:
+                        raise RateLimitError(error_message, response.status_code)
+                    else:
+                        raise APIError(error_message, response.status_code)
 
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
@@ -244,11 +258,16 @@ class OpenAIProvider(BaseLLMProvider):
         status_code = response.status_code
         
         try:
-            error_data = response.json()
-            error_message = error_data.get("error", {}).get("message", "Unknown error")
-            error_type = error_data.get("error", {}).get("type", "unknown")
-        except (json.JSONDecodeError, KeyError):
-            error_message = f"HTTP {status_code}: {response.text}"
+            # Don't try to read JSON from streaming responses
+            if hasattr(response, 'is_stream_consumed') or 'stream' in str(response.request.url):
+                error_message = f"HTTP {status_code}: Streaming request failed"
+                error_type = "streaming_error"
+            else:
+                error_data = response.json()
+                error_message = error_data.get("error", {}).get("message", "Unknown error")
+                error_type = error_data.get("error", {}).get("type", "unknown")
+        except (json.JSONDecodeError, KeyError, httpx.ResponseNotRead):
+            error_message = f"HTTP {status_code}: Request failed"
             error_type = "unknown"
 
         # Classify errors based on status code and type

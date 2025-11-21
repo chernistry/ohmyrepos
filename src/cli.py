@@ -265,7 +265,7 @@ async def _collect_repos() -> List[Dict[str, Any]]:
     try:
         repos = []
         async for repo in collector.collect_starred_repos():
-            repos.append(repo)
+            repos.append(repo.model_dump() if hasattr(repo, 'model_dump') else repo)
         return repos
     finally:
         await collector.close()

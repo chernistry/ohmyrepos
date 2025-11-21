@@ -96,6 +96,9 @@ class ChatAdapter:
         # Convert dict payload to ChatCompletionRequest
         messages = []
         for msg in payload.get("messages", []):
+            # Skip empty messages
+            if not msg.get("content", "").strip():
+                continue
             messages.append(ChatMessage(
                 role=msg["role"],
                 content=msg["content"]
