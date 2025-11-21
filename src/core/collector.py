@@ -219,8 +219,10 @@ class RepoCollector:
         """Fetch repositories in chunks with pagination."""
         page = 1
         
+        # Use authenticated user endpoint to bypass 1000 limit
+        url = "/user/starred"
+        
         while True:
-            url = f"/users/{username}/starred"
             params = {"per_page": self.chunk_size, "page": page}
             
             repos = await self._fetch_page_with_retry(url, params)
