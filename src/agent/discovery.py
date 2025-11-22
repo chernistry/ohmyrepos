@@ -9,7 +9,7 @@ from rich.table import Table
 from rich.prompt import Prompt
 
 from src.agent.profile import analyze_profile, InterestCluster
-from src.agent.search import search_github, get_local_repos
+from src.agent.search import smart_search, get_local_repos
 from src.agent.scoring import score_candidates
 from src.core.storage import QdrantStore
 
@@ -49,10 +49,10 @@ async def _discover_async(
     _print_clusters(clusters)
 
     # Stage 2: Selection
-    selected_query = category
+    intent = category
     selected_cluster = None
     
-    if not selected_query:
+    if not intent:
         # Interactive selection
         choices = [c.name for c in clusters] + ["Custom Query"]
         
@@ -64,15 +64,15 @@ async def _discover_async(
         
         if 0 <= choice_idx < len(clusters):
             selected_cluster = clusters[choice_idx]
-            # Construct query from cluster keywords
-            selected_query = f"language:{selected_cluster.languages[0]} " + " ".join(selected_cluster.keywords[:3])
+            # Construct intent from cluster
+            intent = f"{selected_cluster.name} related to {', '.join(selected_cluster.keywords)}"
             console.print(f"[green]Selected cluster: {selected_cluster.name}[/green]")
         else:
-            selected_query = Prompt.ask("Enter your search query")
+            intent = Prompt.ask("Enter your search intent (e.g., 'Find me RAG agents')")
             # Create a dummy cluster for custom query
-            selected_cluster = InterestCluster(name="Custom", keywords=selected_query.split(), languages=[], score=1.0)
+            selected_cluster = InterestCluster(name="Custom", keywords=intent.split(), languages=[], score=1.0)
 
-    console.print(f"\n[bold]Searching GitHub for:[/bold] '{selected_query}'")
+    console.print(f"\n[bold]Searching GitHub for:[/bold] '{intent}'")
 
     # Stage 3: Search & Dedup
     # Load local repos to exclude
@@ -89,8 +89,8 @@ async def _discover_async(
     excluded = local_repos.union(qdrant_repos)
     console.print(f"Excluding {len(excluded)} known repositories.")
 
-    candidates = await search_github(
-        query=selected_query,
+    candidates = await smart_search(
+        intent=intent,
         max_results=max_results,
         excluded_repos=excluded
     )

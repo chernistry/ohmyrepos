@@ -5,10 +5,12 @@ This module analyzes the user's existing starred repositories to build an intere
 
 import json
 import logging
-from collections import Counter
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import httpx
 from pydantic import BaseModel
+
+from src.config import settings
 
 logger = logging.getLogger("ohmyrepos.agent.profile")
 
@@ -17,10 +19,10 @@ class InterestCluster(BaseModel):
     name: str
     keywords: List[str]
     languages: List[str]
-    score: float  # Relevance score based on frequency
+    score: float  # Relevance score (0.0 - 1.0)
 
 def analyze_profile(repos_path: Path) -> List[InterestCluster]:
-    """Analyze the user's starred repositories to identify interest clusters.
+    """Analyze the user's starred repositories to identify interest clusters using an LLM.
 
     Args:
         repos_path: Path to the JSON file containing starred repositories.
@@ -40,60 +42,99 @@ def analyze_profile(repos_path: Path) -> List[InterestCluster]:
         
         logger.info(f"Analyzing profile from {len(data)} repositories...")
 
-        # 1. Extract features
-        all_languages = []
-        all_topics = []
+        # Prepare data for LLM (limit to last 100 to fit context)
+        # Assuming data is sorted by something, or just take the list as is.
+        # Ideally we'd sort by 'starred_at' if available, but let's just take the first 100.
+        sample_repos = []
+        for repo in data[:100]:
+            sample_repos.append(f"- {repo.get('full_name')}: {repo.get('description')} (Language: {repo.get('language')})")
         
-        for repo in data:
-            # Language
-            lang = repo.get("language")
-            if lang:
-                all_languages.append(lang)
-            
-            # Topics/Tags
-            topics = repo.get("topics", []) or repo.get("tags", [])
-            if isinstance(topics, list):
-                all_topics.extend([t.lower() for t in topics])
+        repos_text = "\n".join(sample_repos)
 
-        # 2. Frequency Analysis
-        lang_counts = Counter(all_languages)
-        topic_counts = Counter(all_topics)
+        prompt = f"""
+        You are an expert developer profile analyzer. Analyze the following list of GitHub repositories starred by a user to identify their core technical interests.
+        
+        Starred Repositories (Sample):
+        {repos_text}
+        
+        Identify 3-5 distinct "Interest Clusters" that represent this user's preferences.
+        For each cluster, provide:
+        1. A descriptive Name (e.g., "Generative AI Agents", "Rust CLI Tools").
+        2. A list of 3-5 specific Search Keywords that would find *new* similar projects on GitHub.
+        3. A list of primary Languages.
+        4. A relevance Score (0.0 to 1.0) based on how prominent this interest appears to be.
 
-        # 3. Simple Clustering (Heuristic for now)
-        # In a real implementation, we might use embeddings or LLM here.
-        # For now, we'll create clusters based on top languages and associated top topics.
+        Return ONLY a JSON object with the following structure:
+        {{
+            "clusters": [
+                {{
+                    "name": "Cluster Name",
+                    "keywords": ["keyword1", "keyword2"],
+                    "languages": ["Python"],
+                    "score": 0.9
+                }}
+            ]
+        }}
+        """
+
+        if not settings.llm:
+            logger.warning("LLM not configured, falling back to empty clusters.")
+            return []
+
+        headers = {}
+        if settings.llm.api_key:
+            headers["Authorization"] = f"Bearer {settings.llm.api_key.get_secret_value()}"
         
-        clusters = []
+        payload = {
+            "model": settings.llm.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "response_format": {"type": "json_object"}
+        }
+
+        # Synchronous call for simplicity in this synchronous function, 
+        # or we could make this function async. 
+        # Since the original was sync, let's keep it sync but use httpx.Client? 
+        # Or better, make it async and update the caller.
+        # The caller `discover` calls `asyncio.run(_discover_async)`, so `_discover_async` is async.
+        # But `analyze_profile` is currently called synchronously inside `_discover_async`.
+        # It's better to make `analyze_profile` async.
         
-        # Get top 3 languages
-        top_langs = lang_counts.most_common(3)
+        # However, to avoid changing the signature too much right now (and breaking imports if I miss one),
+        # I'll use `httpx.Client` (sync) or `httpx.run`? 
+        # Actually, `httpx` has a sync `Client`.
         
-        for lang, count in top_langs:
-            # Find top topics associated with this language (naive approach: global top topics)
-            # A better approach would be to filter repos by language first, then count topics.
-            
-            lang_repos = [r for r in data if r.get("language") == lang]
-            lang_topics = []
-            for r in lang_repos:
-                 ts = r.get("topics", []) or r.get("tags", [])
-                 if isinstance(ts, list):
-                     lang_topics.extend([t.lower() for t in ts])
-            
-            top_lang_topics = [t for t, _ in Counter(lang_topics).most_common(5)]
-            
-            clusters.append(
-                InterestCluster(
-                    name=f"{lang} Ecosystem",
-                    keywords=top_lang_topics,
-                    languages=[lang],
-                    score=count / len(data)
-                )
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(
+                f"{settings.llm.base_url}/chat/completions",
+                json=payload,
+                headers=headers
             )
-
-        # Also add a "General Interests" cluster based on top global topics not covered?
-        # For simplicity, let's just return the language-based clusters for V1.
-        
-        return clusters
+            response.raise_for_status()
+            result = response.json()
+            content = result["choices"][0]["message"]["content"]
+            
+            # Parse JSON
+            try:
+                parsed = json.loads(content)
+                clusters_data = parsed.get("clusters", [])
+                
+                clusters = []
+                for c in clusters_data:
+                    clusters.append(InterestCluster(
+                        name=c["name"],
+                        keywords=c["keywords"],
+                        languages=c["languages"],
+                        score=c["score"]
+                    ))
+                
+                # Sort by score
+                clusters.sort(key=lambda x: x.score, reverse=True)
+                return clusters
+                
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse LLM response: {content}")
+                return []
 
     except Exception as e:
         logger.exception(f"Error analyzing profile: {e}")

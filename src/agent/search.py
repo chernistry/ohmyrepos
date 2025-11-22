@@ -117,6 +117,124 @@ async def search_github(
             logger.exception(f"Search failed: {e}")
             return []
 
+async def generate_search_queries(intent: str) -> List[str]:
+    """Generate optimized GitHub search queries from a natural language intent using LLM.
+
+    Args:
+        intent: The user's search intent (e.g., "Find me RAG frameworks").
+
+    Returns:
+        List of GitHub search query strings.
+    """
+    if not settings.llm:
+        logger.warning("LLM not configured, falling back to simple query.")
+        return [intent]
+
+    prompt = f"""
+    You are an expert at searching GitHub. Convert the following user intent into 3-5 distinct, optimized GitHub search queries to find relevant repositories.
+    
+    User Intent: "{intent}"
+    
+    Rules:
+    1. Use specific GitHub search qualifiers like `topic:`, `language:`, `description:`.
+    2. Vary the keywords to cover different aspects (e.g., synonyms, related technologies).
+    3. Do NOT include `stars:>=` or `pushed:>` qualifiers as these are handled programmatically.
+    4. Return ONLY a JSON object with a list of strings.
+
+    Example Output:
+    {{
+        "queries": [
+            "topic:rag language:python",
+            "retrieval augmented generation description:framework",
+            "topic:llm-agent topic:orchestration"
+        ]
+    }}
+    """
+
+    headers = {}
+    if settings.llm.api_key:
+        headers["Authorization"] = f"Bearer {settings.llm.api_key.get_secret_value()}"
+    
+    payload = {
+        "model": settings.llm.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.2,
+        "response_format": {"type": "json_object"}
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{settings.llm.base_url}/chat/completions",
+                json=payload,
+                headers=headers,
+                timeout=10.0
+            )
+            response.raise_for_status()
+            result = response.json()
+            content = result["choices"][0]["message"]["content"]
+            
+            data = json.loads(content)
+            return data.get("queries", [intent])
+            
+        except Exception as e:
+            logger.error(f"Failed to generate search queries: {e}")
+            return [intent]
+
+async def smart_search(
+    intent: str,
+    min_stars: int = 100,
+    max_results: int = 20,
+    excluded_repos: Optional[Set[str]] = None
+) -> List[RepoMetadata]:
+    """Perform a smart search using multiple generated queries.
+
+    Args:
+        intent: User's natural language intent.
+        min_stars: Minimum stars.
+        max_results: Maximum total results.
+        excluded_repos: Set of repos to exclude.
+
+    Returns:
+        List of unique RepoMetadata objects.
+    """
+    if excluded_repos is None:
+        excluded_repos = set()
+
+    # 1. Generate Queries
+    queries = await generate_search_queries(intent)
+    logger.info(f"Generated queries for '{intent}': {queries}")
+
+    # 2. Run searches in parallel
+    tasks = []
+    for query in queries:
+        tasks.append(
+            search_github(
+                query=query,
+                min_stars=min_stars,
+                max_results=max_results, # Fetch max per query to ensure enough candidates
+                excluded_repos=excluded_repos
+            )
+        )
+    
+    results_list = await asyncio.gather(*tasks)
+    
+    # 3. Aggregate and Deduplicate
+    all_results = []
+    seen_full_names = set(excluded_repos)
+    
+    for batch in results_list:
+        for repo in batch:
+            if repo.full_name not in seen_full_names:
+                all_results.append(repo)
+                seen_full_names.add(repo.full_name)
+    
+    # 4. Sort by stars (or maybe mix them?)
+    # Let's sort by stars for now to surface highest quality first
+    all_results.sort(key=lambda x: x.stars, reverse=True)
+    
+    return all_results[:max_results]
+
 async def get_local_repos(repos_path: str) -> Set[str]:
     """Get set of local repository names from repos.json."""
     import json
@@ -128,10 +246,6 @@ async def get_local_repos(repos_path: str) -> Set[str]:
         
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        # Assuming 'full_name' or 'name' is available. 
-        # If 'full_name' is missing, we might need to construct it or use 'name' carefully.
-        # Based on typical GitHub JSON, 'full_name' (owner/repo) is standard.
-        # Let's check if our repos.json has it.
         return {r.get("full_name", r.get("name")) for r in data if r.get("name")}
     except Exception:
         return set()
