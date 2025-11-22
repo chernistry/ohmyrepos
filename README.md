@@ -21,11 +21,12 @@ Oh My Repos indexes your GitHub repositories, generates summaries/embeddings, an
 
 ## Key Features
 
-- Hybrid search (BM25 + dense vectors) with optional reranking.
-- Streaming RAG chat over SSE using retrieved repo context.
+- **Hybrid search** (BM25 + dense vectors) with optional reranking.
+- **Streaming RAG chat** over SSE using retrieved repo context.
+- **Discovery Agent** — AI-powered GitHub discovery with profile analysis, smart search, and LLM-based scoring.
+- **MCP Server** — Model Context Protocol integration for Claude Desktop/Cursor with search, RAG, and similarity tools.
 - Async ingestion pipeline for GitHub stars → summaries → embeddings → Qdrant.
 - Pluggable providers: OpenRouter/OpenAI/Ollama for LLM; Jina or Ollama embeddings.
-- Scripts for local dev, Docker stack, and MCP tools (Claude/Cursor).
 
 ---
 
@@ -62,6 +63,75 @@ cp .env.example .env
 5) MCP tools (Claude Desktop / Cursor)
 ```bash
 ./run.sh mcp           # stdio transport for MCP tools
+```
+
+---
+
+## Discovery Agent
+
+AI-powered GitHub repository discovery that learns from your starred repos and finds high-quality matches.
+
+**Features:**
+- Profile analysis: LLM identifies interest clusters from your starred repositories
+- Smart search: Multi-strategy GitHub search with query generation and iterative relaxation
+- LLM scoring: Evaluates candidates based on relevance, quality, and alignment with your interests
+- Interactive actions: Star or ingest discovered repos directly from the CLI
+
+**Usage:**
+```bash
+# Discover repos based on your profile
+python -m src.cli agent discover
+
+# Skip profile analysis and search directly
+python -m src.cli agent discover --skip-profile
+
+# Focus on a specific category
+python -m src.cli agent discover --category "RAG frameworks"
+
+# Limit results
+python -m src.cli agent discover --max-results 10
+```
+
+**How it works:**
+1. **Profile Analysis**: Analyzes your starred repos to identify interest clusters (e.g., "AI Agents", "Web Frameworks")
+2. **Smart Search**: Generates optimized GitHub queries and searches with multiple strategies (specific → relaxed → broad)
+3. **Deduplication**: Excludes repos you've already starred or indexed
+4. **LLM Scoring**: Evaluates each candidate on relevance, quality, and fit (score 0-10)
+5. **Interactive Actions**: Star repos on GitHub or ingest them into your local collection
+
+---
+
+## MCP Server
+
+Model Context Protocol server for seamless integration with Claude Desktop and Cursor.
+
+**Available Tools:**
+- `search_repos`: Hybrid search over your indexed repositories
+- `get_repo_summary`: Retrieve stored summary and metadata for a specific repo
+- `ask_about_repos`: RAG-style Q&A using repository context
+- `get_similar_repos`: Find repositories similar to a given anchor repo
+
+**Setup for Claude Desktop:**
+```json
+{
+  "mcpServers": {
+    "ohmyrepos": {
+      "command": "/path/to/ohmyrepos/.venv/bin/python",
+      "args": ["/path/to/ohmyrepos/mcp_server.py"],
+      "env": {
+        "PYTHONPATH": "/path/to/ohmyrepos"
+      }
+    }
+  }
+}
+```
+
+**Usage in Claude/Cursor:**
+```
+"Search my repos for RAG frameworks"
+"What's the summary of langchain/langchain?"
+"Find repos similar to vercel/next.js"
+"Which repos use TypeScript and focus on AI agents?"
 ```
 
 ---

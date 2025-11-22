@@ -32,7 +32,8 @@ async def search_github(
     query: str,
     min_stars: int = 100,
     max_results: int = 20,
-    excluded_repos: Optional[Set[str]] = None
+    excluded_repos: Optional[Set[str]] = None,
+    strict_time: bool = True
 ) -> List[RepoMetadata]:
     """Search GitHub for repositories matching the query.
 
@@ -41,6 +42,7 @@ async def search_github(
         min_stars: Minimum number of stars.
         max_results: Maximum number of results to return.
         excluded_repos: Set of repository names (full_name) to exclude.
+        strict_time: If True, filter by recent activity (last year).
 
     Returns:
         List of RepoMetadata objects.
@@ -53,8 +55,9 @@ async def search_github(
     search_query = f"{query} stars:>={min_stars} is:public"
     
     # Filter by pushed date (e.g., last year) to ensure freshness
-    one_year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
-    search_query += f" pushed:>{one_year_ago}"
+    if strict_time:
+        one_year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        search_query += f" pushed:>{one_year_ago}"
 
     logger.info(f"Searching GitHub with query: '{search_query}'")
 
@@ -118,11 +121,12 @@ async def search_github(
             logger.exception(f"Search failed: {e}")
             return []
 
-async def generate_search_queries(intent: str) -> List[str]:
+async def generate_search_queries(intent: str, strategy: str = "specific") -> List[str]:
     """Generate optimized GitHub search queries from a natural language intent using LLM.
 
     Args:
         intent: The user's search intent (e.g., "Find me RAG frameworks").
+        strategy: "specific" for precise queries, "broad" for wider discovery.
 
     Returns:
         List of GitHub search query strings.
@@ -133,7 +137,7 @@ async def generate_search_queries(intent: str) -> List[str]:
 
     from pathlib import Path
     prompt_template = Path("prompts/search_query_generation.md").read_text(encoding="utf-8")
-    prompt = prompt_template.replace("{{intent}}", intent)
+    prompt = prompt_template.replace("{{intent}}", intent).replace("{{strategy}}", strategy)
 
     headers = {}
     if settings.llm.api_key:
@@ -142,7 +146,7 @@ async def generate_search_queries(intent: str) -> List[str]:
     payload = {
         "model": settings.llm.model,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.2,
+        "temperature": 0.4 if strategy == "broad" else 0.2,
         "response_format": {"type": "json_object"}
     }
 
@@ -171,7 +175,7 @@ async def smart_search(
     max_results: int = 20,
     excluded_repos: Optional[Set[str]] = None
 ) -> List[RepoMetadata]:
-    """Perform a smart search using multiple generated queries.
+    """Perform a smart search using multiple generated queries with iterative relaxation.
 
     Args:
         intent: User's natural language intent.
@@ -185,39 +189,70 @@ async def smart_search(
     if excluded_repos is None:
         excluded_repos = set()
 
-    # 1. Generate Queries
-    queries = await generate_search_queries(intent)
-    logger.info(f"Generated queries for '{intent}': {queries}")
+    all_results = []
+    seen_full_names = set(excluded_repos)
+    
+    # Strategy 1: Specific queries with strict constraints
+    logger.info(f"Deep Search [1/3]: Specific queries for '{intent}'")
+    queries = await generate_search_queries(intent, strategy="specific")
+    
+    # Initial search with strict constraints
+    results = await _execute_search_batch(queries, min_stars, max_results, seen_full_names, strict_time=True)
+    all_results.extend(results)
+    
+    if len(all_results) >= max_results // 2:
+        return all_results[:max_results]
+        
+    # Strategy 2: Relax time constraint and star count
+    logger.info(f"Deep Search [2/3]: Relaxing constraints (time & stars) for '{intent}'")
+    # Use same queries but relax constraints in execution
+    results = await _execute_search_batch(queries, min_stars // 2, max_results, seen_full_names, strict_time=False)
+    all_results.extend(results)
+    
+    if len(all_results) >= max_results // 2:
+        return all_results[:max_results]
 
-    # 2. Run searches in parallel
+    # Strategy 3: Broad queries
+    logger.info(f"Deep Search [3/3]: Generating broad queries for '{intent}'")
+    broad_queries = await generate_search_queries(intent, strategy="broad")
+    results = await _execute_search_batch(broad_queries, min_stars // 4, max_results, seen_full_names, strict_time=False)
+    all_results.extend(results)
+
+    # Sort by stars
+    all_results.sort(key=lambda x: x.stars, reverse=True)
+    
+    return all_results[:max_results]
+
+async def _execute_search_batch(
+    queries: List[str],
+    min_stars: int,
+    max_results: int,
+    excluded_repos: Set[str],
+    strict_time: bool
+) -> List[RepoMetadata]:
+    """Helper to execute a batch of queries."""
     tasks = []
     for query in queries:
         tasks.append(
             search_github(
                 query=query,
                 min_stars=min_stars,
-                max_results=max_results, # Fetch max per query to ensure enough candidates
-                excluded_repos=excluded_repos
+                max_results=max_results,
+                excluded_repos=excluded_repos,
+                strict_time=strict_time
             )
         )
     
     results_list = await asyncio.gather(*tasks)
     
-    # 3. Aggregate and Deduplicate
-    all_results = []
-    seen_full_names = set(excluded_repos)
-    
+    batch_results = []
     for batch in results_list:
         for repo in batch:
-            if repo.full_name not in seen_full_names:
-                all_results.append(repo)
-                seen_full_names.add(repo.full_name)
-    
-    # 4. Sort by stars (or maybe mix them?)
-    # Let's sort by stars for now to surface highest quality first
-    all_results.sort(key=lambda x: x.stars, reverse=True)
-    
-    return all_results[:max_results]
+            if repo.full_name not in excluded_repos:
+                batch_results.append(repo)
+                excluded_repos.add(repo.full_name)
+                
+    return batch_results
 
 async def get_local_repos(repos_path: str) -> Set[str]:
     """Get set of local repository names from repos.json."""
