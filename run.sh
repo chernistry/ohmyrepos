@@ -3,6 +3,7 @@
 set -e
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PYTHON_BIN="${PYTHON_BIN:-python}"
 
 ensure_compose() {
   if command -v docker-compose >/dev/null 2>&1; then
@@ -66,6 +67,22 @@ stack_down() {
   $COMPOSE_CMD down
 }
 
+stack_logs() {
+  cd "$ROOT_DIR"
+  COMPOSE_CMD="$(ensure_compose)"
+  $COMPOSE_CMD logs -f
+}
+
+run_setup() {
+  cd "$ROOT_DIR"
+  $PYTHON_BIN scripts/setup.py
+}
+
+run_mcp() {
+  cd "$ROOT_DIR"
+  $PYTHON_BIN mcp_server.py
+}
+
 case "$1" in
   dev)
     dev_stack
@@ -94,11 +111,18 @@ case "$1" in
     case "$2" in
       up)   stack_up ;;
       down) stack_down ;;
+      logs) stack_logs ;;
       *)
-        echo "Usage: ./run.sh stack [up|down]"
+        echo "Usage: ./run.sh stack [up|down|logs]"
         exit 1
         ;;
     esac
+    ;;
+  setup)
+    run_setup
+    ;;
+  mcp)
+    run_mcp
     ;;
   *)
     echo "Usage:"
@@ -106,6 +130,9 @@ case "$1" in
     echo "  ./run.sh b start|stop  # Start/stop backend (uvicorn)"
     echo "  ./run.sh f start|stop  # Start/stop frontend (Next.js dev)"
     echo "  ./run.sh stack up|down # Start/stop Docker stack (API + Qdrant)"
+    echo "  ./run.sh stack logs    # Tail Docker stack logs"
+    echo "  ./run.sh setup         # Interactive setup + optional ingestion"
+    echo "  ./run.sh mcp           # Start MCP server (stdio transport)"
     exit 1
     ;;
 esac

@@ -6,6 +6,8 @@ services:
       context: .
       dockerfile: Dockerfile.api
     container_name: ohmyrepos-api
+    env_file:
+      - .env
     environment:
       - ENVIRONMENT=production
       - GITHUB_USERNAME=${GITHUB_USERNAME}

@@ -17,10 +17,12 @@
 7. [Vector Search and Hybrid Retrieval](#vector-search-and-hybrid-retrieval)
 8. [LLM & RAG Chat](#llm--rag-chat)
 9. [CLI & Batch Ingestion](#cli--batch-ingestion)
-10. [Configuration & Environments](#configuration--environments)
-11. [API Reference](#api-reference)
-12. [Architecture Decisions (ADR-style)](#architecture-decisions-adr-style)
-13. [Troubleshooting](#troubleshooting)
+10. [MCP / Agent Integrations](#mcp--agent-integrations)
+11. [Setup Automation & Dev Tooling](#setup-automation--dev-tooling)
+12. [Configuration & Environments](#configuration--environments)
+13. [API Reference](#api-reference)
+14. [Architecture Decisions (ADR-style)](#architecture-decisions-adr-style)
+15. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -56,14 +58,14 @@ graph TD
     end
 
     subgraph "Processing Pipeline"
-        LLM_SUMMARIZER[LLM Summarizer<br/>OpenAI/Ollama]
-        EMBEDDING_GEN[Jina Embeddings<br/>Generation]
-        CONCURRENT_PROC[Concurrent Processing<br/>Pool]
+        LLM_SUMMARIZER[LLM Summarizer (OpenAI/Ollama)]
+        EMBEDDING_GEN[Embedding Generation (Jina/Ollama)]
+        CONCURRENT_PROC[Concurrent Processing Pool]
     end
 
     subgraph "Storage Layer"
-        QDRANT[(Qdrant Vector DB<br/>Semantic Storage)]
-        BM25_INDEX[BM25 Lexical Index<br/>In-Memory]
+        QDRANT[(Qdrant Vector DB)]
+        BM25_INDEX[BM25 Lexical Index]
         JSON_CACHE[JSON Metadata Cache]
     end
 
@@ -564,6 +566,54 @@ async def _summarize_repos(...):
 ```
 
 </details>
+
+---
+
+## MCP / Agent Integrations
+
+`mcp_server.py` exposes Oh My Repos as a Model Context Protocol (MCP) server (stdio transport) for Claude Desktop, Cursor, and other MCP-aware tools.
+
+### Tools
+- `search_repos` — hybrid BM25 + vector search over indexed repositories (`query`, optional `limit`).
+- `get_repo_summary` — return stored metadata/summary for `repo_full_name`.
+- `ask_about_repos` — RAG answer using retrieved context (`question`, optional `repo_full_name`, `limit`).
+- `get_similar_repos` — find similar repositories relative to `repo_full_name`.
+
+### Running
+```bash
+./run.sh mcp             # stdio transport (default for Claude/Cursor)
+# or
+python mcp_server.py --log-level DEBUG
+```
+
+Notes:
+- Uses the same `HybridRetriever` + `LLMGenerator`; expects `.env` and populated `repos.json`/Qdrant.
+- BM25 will return empty results until ingestion has run; Qdrant is used when configured.
+- Example Claude Desktop source entry:
+```json
+{ "command": "python", "args": ["mcp_server.py"] }
+```
+
+---
+
+## Setup Automation & Dev Tooling
+
+### Interactive setup
+`./run.sh setup` (see `scripts/setup.py`) performs:
+- Provider choice with 10s timeout (defaults to Ollama embeddings, pulls `embeddinggemma:latest` via `ollama pull` if missing).
+- Prompts for GitHub, Qdrant, embedding, and chat LLM keys; writes `.env`.
+- Optional first-run ingestion: `collect` (starred repos) + `embed` (summaries, embeddings, Qdrant push).
+
+### Dev commands (`run.sh`)
+- `./run.sh dev` — start FastAPI (`uvicorn`) + Next.js (port 3000) with shared lifecycle.
+- `./run.sh b start|stop` and `./run.sh f start|stop` — control backend/frontend separately.
+- `./run.sh stack up|down|logs` — Dockerized API + Qdrant (Ollama expected on host).
+- `./run.sh mcp` — start MCP stdio server for agent integrations.
+
+### Docker stack (api + Qdrant)
+- Compose file only runs API + Qdrant; Ollama is intentionally **not** containerized for better local performance.
+- API healthcheck uses `/healthz`; Qdrant exposed on `localhost:6333`.
+- Compose consumes `.env` for secrets; ensure `./run.sh setup` or manual `.env` creation precedes `stack up`.
 
 ---
 

@@ -21,6 +21,9 @@ nest-asyncio
 fastapi
 uvicorn[standard]
 
+# MCP (Model Context Protocol) server
+mcp>=1.22.0
+
 # Security and secrets management
 cryptography
 keyring
