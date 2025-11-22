@@ -40,18 +40,12 @@ class IngestionPipeline:
         """
         try:
             # Retrieve existing point
-            # Note: This assumes QdrantStore has a method to get a point by ID
-            # If not, we might need to add it or use search with filter
-            # For now, we'll assume we can search by ID
-            points = await self.qdrant_store.client.retrieve(
-                collection_name=self.qdrant_store.collection_name,
-                ids=[self.qdrant_store._generate_id(repo_id)]
-            )
+            point = await self.qdrant_store.get_point(self.qdrant_store._generate_secure_id(repo_id))
             
-            if not points:
+            if not point:
                 return True
                 
-            payload = points[0].payload
+            payload = point.payload
             stored_pushed_at = payload.get("last_pushed_at")
             
             if not stored_pushed_at:

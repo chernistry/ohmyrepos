@@ -111,25 +111,69 @@ async def _discover_async(
         console.print("[yellow]No high-quality repositories found (Score >= 7.0).[/yellow]")
         return
 
-    console.print(f"\n[bold green]Found {len(high_quality_results)} top recommendations:[/bold green]")
-    table = Table(show_header=True, header_style="bold cyan")
-    table.add_column("Name")
-    table.add_column("Score")
-    table.add_column("Reasoning")
-    table.add_column("URL")
-    
-    for item in high_quality_results:
-        table.add_row(
-            item.repo.full_name,
-            f"{item.score:.1f}",
-            item.reasoning,
-            f"[link={item.repo.url}]Link[/link]"
-        )
-    
-    console.print(table)
-    
-    # Placeholder for future stages
-    console.print("\n[dim]Actions stage (Star/Ingest) is not yet implemented.[/dim]")
+    # Interactive Action Loop
+    from src.agent.actions import ActionManager
+    action_manager = ActionManager()
+
+    while True:
+        console.print(f"\n[bold green]Found {len(high_quality_results)} top recommendations:[/bold green]")
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("#", style="dim")
+        table.add_column("Name")
+        table.add_column("Score")
+        table.add_column("Reasoning")
+        table.add_column("URL")
+        
+        for idx, item in enumerate(high_quality_results, 1):
+            table.add_row(
+                str(idx),
+                item.repo.full_name,
+                f"{item.score:.1f}",
+                item.reasoning,
+                f"[link={item.repo.url}]Link[/link]"
+            )
+        
+        console.print(table)
+        
+        console.print("\n[bold]Actions:[/bold]")
+        console.print("[bold green]S[/bold green] <number>: Star repository (e.g., 'S 1')")
+        console.print("[bold blue]I[/bold blue] <number>: Ingest repository (e.g., 'I 1')")
+        console.print("[bold yellow]C[/bold yellow]: Continue / Exit")
+        
+        choice = Prompt.ask("Enter action").strip().upper()
+        
+        if choice == "C":
+            break
+            
+        try:
+            action, idx_str = choice.split(maxsplit=1)
+            idx = int(idx_str) - 1
+            
+            if 0 <= idx < len(high_quality_results):
+                repo = high_quality_results[idx].repo
+                
+                if action == "S":
+                    console.print(f"Starring {repo.full_name}...")
+                    if await action_manager.star_repo(repo.full_name):
+                        console.print(f"[green]Successfully starred {repo.full_name}![/green]")
+                    else:
+                        console.print(f"[red]Failed to star {repo.full_name}. Check logs.[/red]")
+                        
+                elif action == "I":
+                    console.print(f"Ingesting {repo.full_name}...")
+                    if await action_manager.ingest_repo(repo.url):
+                        console.print(f"[green]Successfully ingested {repo.full_name}![/green]")
+                    else:
+                        console.print(f"[red]Failed to ingest {repo.full_name}. Check logs.[/red]")
+                else:
+                    console.print("[red]Invalid action code.[/red]")
+            else:
+                console.print("[red]Invalid repository number.[/red]")
+                
+        except ValueError:
+            console.print("[red]Invalid format. Use 'S 1' or 'I 1'.[/red]")
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
 
 def _print_clusters(clusters: List[InterestCluster]):
     table = Table(show_header=True, header_style="bold magenta")

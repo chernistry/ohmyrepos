@@ -640,6 +640,28 @@ class QdrantStore(LoggerMixin):
 
         return qdrant_models.Filter(must=must_conditions) if must_conditions else None
 
+    async def get_point(self, point_id: str) -> Optional[qdrant_models.Record]:
+        """Get a point by its ID.
+
+        Args:
+            point_id: The ID of the point to retrieve
+
+        Returns:
+            The point record if found, None otherwise
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            points = await self._client.retrieve(
+                collection_name=self.collection_name,
+                ids=[point_id]
+            )
+            return points[0] if points else None
+        except Exception as e:
+            self.logger.warning(f"Failed to retrieve point {point_id}: {e}")
+            return None
+
     async def get_existing_repositories(self) -> Set[str]:
         """Get set of repository names that already exist in the collection.
 
