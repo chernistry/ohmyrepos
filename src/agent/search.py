@@ -33,7 +33,8 @@ async def search_github(
     min_stars: int = 100,
     max_results: int = 20,
     excluded_repos: Optional[Set[str]] = None,
-    strict_time: bool = True
+    strict_time: bool = True,
+    sort_by: str = "stars"
 ) -> List[RepoMetadata]:
     """Search GitHub for repositories matching the query.
 
@@ -43,6 +44,7 @@ async def search_github(
         max_results: Maximum number of results to return.
         excluded_repos: Set of repository names (full_name) to exclude.
         strict_time: If True, filter by recent activity (last year).
+        sort_by: Sort criterion ("stars" or "updated").
 
     Returns:
         List of RepoMetadata objects.
@@ -59,7 +61,7 @@ async def search_github(
         one_year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
         search_query += f" pushed:>{one_year_ago}"
 
-    logger.info(f"Searching GitHub with query: '{search_query}'")
+    logger.info(f"Searching GitHub with query: '{search_query}' (sort={sort_by})")
 
     headers = {
         "Accept": "application/vnd.github.v3+json",
@@ -75,7 +77,7 @@ async def search_github(
                 "https://api.github.com/search/repositories",
                 params={
                     "q": search_query,
-                    "sort": "stars",
+                    "sort": sort_by,
                     "order": "desc",
                     "per_page": min(100, max_results * 2) # Fetch more to allow for dedup
                 },
@@ -120,6 +122,41 @@ async def search_github(
         except Exception as e:
             logger.exception(f"Search failed: {e}")
             return []
+
+# ... (generate_search_queries and expand_domain_terms remain unchanged) ...
+
+async def _execute_search_batch(
+    queries: List[str],
+    min_stars: int,
+    max_results: int,
+    excluded_repos: Set[str],
+    strict_time: bool,
+    sort_by: str = "stars"
+) -> List[RepoMetadata]:
+    """Helper to execute a batch of queries."""
+    tasks = []
+    for query in queries:
+        tasks.append(
+            search_github(
+                query=query,
+                min_stars=min_stars,
+                max_results=max_results,
+                excluded_repos=excluded_repos,
+                strict_time=strict_time,
+                sort_by=sort_by
+            )
+        )
+    
+    results_list = await asyncio.gather(*tasks)
+    
+    batch_results = []
+    for batch in results_list:
+        for repo in batch:
+            if repo.full_name not in excluded_repos:
+                batch_results.append(repo)
+                excluded_repos.add(repo.full_name)
+                
+    return batch_results
 
 async def generate_search_queries(intent: str, strategy: str = "specific") -> List[str]:
     """Generate optimized GitHub search queries from a natural language intent using LLM.
@@ -208,6 +245,77 @@ async def expand_domain_terms(intent: str) -> List[str]:
             logger.warning(f"Failed to expand domain terms: {e}")
             return []
 
+async def evolve_intent(original_intent: str, previous_intents: List[str], found_repos: List[str]) -> str:
+    """Generate a new, evolved search intent based on previous findings."""
+    if not settings.llm:
+        return original_intent
+
+    prompt = f"""
+    Task: Generate a NEW, DISTINCT search intent to discover more GitHub repositories related to the user's original goal.
+    
+    Original Goal: "{original_intent}"
+    
+    We have already searched for:
+    {json.dumps(previous_intents, indent=2)}
+    
+    We have already found these repositories (DO NOT search for them again):
+    {json.dumps(found_repos[:20], indent=2)}  # Top 20 found
+    
+    Goal: Find *different* or *niche* or *related* repositories that we might have missed. 
+    Think about:
+    - Alternative frameworks or libraries
+    - Specific use cases (e.g., "for finance", "for healthcare")
+    - Underlying technologies (e.g., "vector database", "knowledge graph")
+    - Competitors or alternatives to found repos
+    
+    Output JSON: {{ "new_intent": "your new search query string" }}
+    """
+    
+    headers = {}
+    if settings.llm.api_key:
+        headers["Authorization"] = f"Bearer {settings.llm.api_key.get_secret_value()}"
+    
+    payload = {
+        "model": settings.llm.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7, # Higher temperature for creativity
+        "response_format": {"type": "json_object"}
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{settings.llm.base_url}/chat/completions",
+                json=payload,
+                headers=headers,
+                timeout=10.0
+            )
+            response.raise_for_status()
+            data = response.json()
+            content = json.loads(data["choices"][0]["message"]["content"])
+            return content.get("new_intent", original_intent)
+        except Exception as e:
+            logger.warning(f"Failed to evolve intent: {e}")
+            return original_intent
+
+def calculate_discovery_rank(repo: RepoMetadata) -> float:
+    """Calculate a discovery rank based on stars and freshness."""
+    try:
+        updated_at = datetime.fromisoformat(repo.updated_at.replace("Z", "+00:00"))
+        days_since_update = (datetime.now(updated_at.tzinfo) - updated_at).days
+    except Exception:
+        days_since_update = 365 # Default to 1 year if parsing fails
+
+    freshness_boost = 1.0
+    if days_since_update < 30:
+        freshness_boost = 1.5
+    elif days_since_update < 180:
+        freshness_boost = 1.2
+    
+    # Rank = Stars * FreshnessBoost
+    # This allows a 500 star repo updated today (750 rank) to beat a 700 star repo updated a year ago (700 rank)
+    return repo.stars * freshness_boost
+
 async def smart_search(
     intent: str,
     min_stars: int = 100,
@@ -241,66 +349,52 @@ async def smart_search(
         enriched_intent = intent
 
     # Strategy 1: Specific queries with strict constraints
-    logger.info(f"Deep Search [1/3]: Specific queries for '{enriched_intent}'")
+    logger.info(f"Deep Search [1/4]: Specific queries for '{enriched_intent}'")
     queries = await generate_search_queries(enriched_intent, strategy="specific")
     
-    # Initial search with strict constraints
-    results = await _execute_search_batch(queries, min_stars, max_results, seen_full_names, strict_time=True)
+    results = await _execute_search_batch(queries, min_stars, max_results, excluded_repos=seen_full_names, strict_time=True)
     all_results.extend(results)
     
-    if len(all_results) >= max_results // 2:
+    # Strategy 2: Freshness Search (High stars, sorted by updated)
+    # Only if we need more results or just to mix in fresh content
+    logger.info(f"Deep Search [2/4]: Freshness search (Stars >= {min_stars * 2}, sort=updated)")
+    # Use the same specific queries but sort by updated and require higher stars to filter noise
+    results = await _execute_search_batch(
+        queries, 
+        min_stars=max(200, min_stars * 2), 
+        max_results=max_results, 
+        excluded_repos=seen_full_names, 
+        strict_time=False, # We sort by updated, so we don't need strict time filter, but we want recent ones at top
+        sort_by="updated"
+    )
+    all_results.extend(results)
+
+    if len(all_results) >= max_results:
+        # Sort by intelligent rank
+        all_results.sort(key=calculate_discovery_rank, reverse=True)
         return all_results[:max_results]
         
-    # Strategy 2: Relax time constraint and star count
-    logger.info(f"Deep Search [2/3]: Relaxing constraints (time & stars) for '{enriched_intent}'")
-    # Use same queries but relax constraints in execution
-    results = await _execute_search_batch(queries, min_stars // 2, max_results, seen_full_names, strict_time=False)
+    # Strategy 3: Relax time constraint and star count
+    logger.info(f"Deep Search [3/4]: Relaxing constraints (time & stars) for '{enriched_intent}'")
+    results = await _execute_search_batch(queries, min_stars // 2, max_results, excluded_repos=seen_full_names, strict_time=False)
     all_results.extend(results)
     
-    if len(all_results) >= max_results // 2:
+    if len(all_results) >= max_results:
+        all_results.sort(key=calculate_discovery_rank, reverse=True)
         return all_results[:max_results]
 
-    # Strategy 3: Broad queries
-    logger.info(f"Deep Search [3/3]: Generating broad queries for '{enriched_intent}'")
+    # Strategy 4: Broad queries
+    logger.info(f"Deep Search [4/4]: Generating broad queries for '{enriched_intent}'")
     broad_queries = await generate_search_queries(enriched_intent, strategy="broad")
-    results = await _execute_search_batch(broad_queries, min_stars // 4, max_results, seen_full_names, strict_time=False)
+    results = await _execute_search_batch(broad_queries, min_stars // 4, max_results, excluded_repos=seen_full_names, strict_time=False)
     all_results.extend(results)
 
-    # Sort by stars
-    all_results.sort(key=lambda x: x.stars, reverse=True)
+    # Sort by intelligent rank
+    all_results.sort(key=calculate_discovery_rank, reverse=True)
     
     return all_results[:max_results]
 
-async def _execute_search_batch(
-    queries: List[str],
-    min_stars: int,
-    max_results: int,
-    excluded_repos: Set[str],
-    strict_time: bool
-) -> List[RepoMetadata]:
-    """Helper to execute a batch of queries."""
-    tasks = []
-    for query in queries:
-        tasks.append(
-            search_github(
-                query=query,
-                min_stars=min_stars,
-                max_results=max_results,
-                excluded_repos=excluded_repos,
-                strict_time=strict_time
-            )
-        )
-    
-    results_list = await asyncio.gather(*tasks)
-    
-    batch_results = []
-    for batch in results_list:
-        for repo in batch:
-            if repo.full_name not in excluded_repos:
-                batch_results.append(repo)
-                excluded_repos.add(repo.full_name)
-                
-    return batch_results
+
 
 async def get_local_repos(repos_path: str) -> Set[str]:
     """Get set of local repository names from repos.json."""

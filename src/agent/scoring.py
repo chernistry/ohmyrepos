@@ -48,74 +48,80 @@ async def fetch_readme(repo_full_name: str) -> str:
             logger.warning(f"Failed to fetch README for {repo_full_name}: {e}")
             return ""
 
+import asyncio
+
 async def score_candidates(
     candidates: List[RepoMetadata],
     profile: InterestCluster
 ) -> List[ScoredRepo]:
-    """Score candidate repositories against the user profile."""
+    """Score candidate repositories against the user profile in parallel."""
     scored_repos = []
-    
-    for repo in candidates:
-        readme = await fetch_readme(repo.full_name)
-        
-        from pathlib import Path
-        prompt_template = Path("prompts/repo_scoring.md").read_text(encoding="utf-8")
-        prompt = prompt_template.replace("{{profile_name}}", profile.name) \
-            .replace("{{profile_keywords}}", ', '.join(profile.keywords)) \
-            .replace("{{repo_full_name}}", repo.full_name) \
-            .replace("{{repo_description}}", str(repo.description)) \
-            .replace("{{repo_language}}", str(repo.language)) \
-            .replace("{{repo_stars}}", str(repo.stars)) \
-            .replace("{{readme_content}}", readme[:5000])
-        
-        try:
-            # Use the configured LLM
-            if not settings.llm:
-                logger.warning("LLM not configured, skipping scoring.")
-                continue
+    sem = asyncio.Semaphore(5)  # Limit concurrency to 5
 
-            headers = {}
-            if settings.llm.api_key:
-                headers["Authorization"] = f"Bearer {settings.llm.api_key.get_secret_value()}"
-            
-            payload = {
-                "model": settings.llm.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1
-            }
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{settings.llm.base_url}/chat/completions",
-                    json=payload,
-                    headers=headers,
-                    timeout=30.0
-                )
-                response.raise_for_status()
-                result = response.json()
-                content = result["choices"][0]["message"]["content"]
+    async def _score_single_repo(repo: RepoMetadata):
+        async with sem:
+            try:
+                readme = await fetch_readme(repo.full_name)
                 
-                # Parse JSON from content (handle potential markdown code blocks)
-                if "```json" in content:
-                    content = content.split("```json")[1].split("```")[0]
-                elif "```" in content:
-                    content = content.split("```")[1].split("```")[0]
+                from pathlib import Path
+                prompt_template = Path("prompts/repo_scoring.md").read_text(encoding="utf-8")
+                prompt = prompt_template.replace("{{profile_name}}", profile.name) \
+                    .replace("{{profile_keywords}}", ', '.join(profile.keywords)) \
+                    .replace("{{repo_full_name}}", repo.full_name) \
+                    .replace("{{repo_description}}", str(repo.description)) \
+                    .replace("{{repo_language}}", str(repo.language)) \
+                    .replace("{{repo_stars}}", str(repo.stars)) \
+                    .replace("{{readme_content}}", readme[:5000])
                 
-                data = json.loads(content.strip())
+                # Use the configured LLM
+                if not settings.llm:
+                    logger.warning("LLM not configured, skipping scoring.")
+                    return None
+
+                headers = {}
+                if settings.llm.api_key:
+                    headers["Authorization"] = f"Bearer {settings.llm.api_key.get_secret_value()}"
                 
-                scored_repo = ScoredRepo(
-                    repo=repo,
-                    score=float(data["score"]),
-                    reasoning=data["reasoning"],
-                    readme_summary=data.get("summary")
-                )
-                scored_repos.append(scored_repo)
+                payload = {
+                    "model": settings.llm.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.1
+                }
                 
-        except Exception as e:
-            logger.error(f"Failed to score {repo.full_name}: {e}")
-            # Fallback: add with neutral score if LLM fails? Or skip?
-            # Let's skip for now to ensure high quality.
-            continue
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"{settings.llm.base_url}/chat/completions",
+                        json=payload,
+                        headers=headers,
+                        timeout=30.0
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+                    content = result["choices"][0]["message"]["content"]
+                    
+                    # Parse JSON from content
+                    if "```json" in content:
+                        content = content.split("```json")[1].split("```")[0]
+                    elif "```" in content:
+                        content = content.split("```")[1].split("```")[0]
+                    
+                    data = json.loads(content.strip())
+                    
+                    return ScoredRepo(
+                        repo=repo,
+                        score=float(data["score"]),
+                        reasoning=data["reasoning"],
+                        readme_summary=data.get("summary")
+                    )
+                    
+            except Exception as e:
+                logger.error(f"Failed to score {repo.full_name}: {e}")
+                return None
+
+    tasks = [_score_single_repo(repo) for repo in candidates]
+    results = await asyncio.gather(*tasks)
+    
+    scored_repos = [r for r in results if r is not None]
             
     # Sort by score descending
     scored_repos.sort(key=lambda x: x.score, reverse=True)

@@ -132,26 +132,96 @@ async def _discover_async(
     # Interactive Action Loop
     from src.agent.actions import ActionManager
     action_manager = ActionManager()
-
+    
+    # Track state for continuous loop
+    starred_count = 0
+    starred_repos = set()
+    current_intent = intent
+    previous_intents = [intent]
+    
     if auto_mode:
         console.print(f"\n[bold magenta]Running in Autonomous Mode (Limit: {limit})[/bold magenta]")
-        starred_count = 0
         
-        for item in high_quality_results:
+        while starred_count < limit:
+            # If this is not the first iteration, we need to search again with evolved intent
+            if len(previous_intents) > 1:
+                console.print(f"\n[bold blue]Evolving Search...[/bold blue]")
+                console.print(f"New Intent: '{current_intent}'")
+                
+                # Update excluded repos with what we found so far
+                excluded.update(starred_repos)
+                
+                candidates = await smart_search(
+                    intent=current_intent,
+                    max_results=max_results,
+                    excluded_repos=excluded
+                )
+                
+                if not candidates:
+                    console.print("[yellow]No new candidates found with this intent. Trying to evolve again...[/yellow]")
+                    # Force evolution even if no candidates found
+                else:
+                    console.print(f"\n[bold]Scoring {len(candidates)} new candidates...[/bold]")
+                    scored_results = await score_candidates(candidates, selected_cluster)
+                    high_quality_results = [r for r in scored_results if r.score >= 7.0]
+            
+            # Adaptive Thresholding Loop for current batch
+            thresholds = [8.5, 7.5, 7.0]
+            batch_starred = 0
+            
+            for threshold in thresholds:
+                if starred_count >= limit:
+                    break
+                
+                # If we already starred something in this batch (at higher threshold), 
+                # we might not need to lower threshold if we are happy with quality.
+                # But to maximize recall, we can continue.
+                # Let's stick to: if we found 0 at 8.5, try 7.5.
+                if batch_starred > 0:
+                    break
+                    
+                console.print(f"[cyan]Checking candidates with score >= {threshold}...[/cyan]")
+                
+                for item in high_quality_results:
+                    if starred_count >= limit:
+                        break
+                    
+                    if item.repo.full_name in starred_repos:
+                        continue
+                        
+                    if item.score >= threshold:
+                        console.print(f"Auto-starring [bold]{item.repo.full_name}[/bold] (Score: {item.score:.1f})...")
+                        if await action_manager.star_repo(item.repo.full_name):
+                            console.print(f"[green]Successfully starred {item.repo.full_name}![/green]")
+                            starred_count += 1
+                            batch_starred += 1
+                            starred_repos.add(item.repo.full_name)
+                            excluded.add(item.repo.full_name) # Add to excluded immediately
+                        else:
+                            console.print(f"[red]Failed to star {item.repo.full_name}.[/red]")
+            
             if starred_count >= limit:
-                console.print(f"[yellow]Reached limit of {limit} stars. Stopping.[/yellow]")
                 break
                 
-            if item.score >= 8.5:
-                console.print(f"Auto-starring [bold]{item.repo.full_name}[/bold] (Score: {item.score:.1f})...")
-                if await action_manager.star_repo(item.repo.full_name):
-                    console.print(f"[green]Successfully starred {item.repo.full_name}![/green]")
-                    starred_count += 1
-                else:
-                    console.print(f"[red]Failed to star {item.repo.full_name}.[/red]")
-            else:
-                console.print(f"[dim]Skipping {item.repo.full_name} (Score: {item.score:.1f} < 8.5)[/dim]")
+            # Evolve Intent for next iteration
+            from src.agent.search import evolve_intent
+            console.print("[dim]Thinking about next search step...[/dim]")
+            
+            # Collect names of found repos to avoid
+            found_names = [r.repo.full_name for r in high_quality_results]
+            
+            new_intent = await evolve_intent(intent, previous_intents, found_names)
+            
+            if new_intent == current_intent or new_intent in previous_intents:
+                console.print("[yellow]Could not generate distinct new intent. Stopping.[/yellow]")
+                break
                 
+            current_intent = new_intent
+            previous_intents.append(current_intent)
+            
+            # Small pause to be nice to APIs
+            await asyncio.sleep(2)
+
         console.print(f"\n[bold]Autonomous session complete. Starred {starred_count} repositories.[/bold]")
         
     else:
