@@ -235,14 +235,38 @@ def collect(
         "-o",
         help="Path to output file for collected repositories",
     ),
+    incremental: bool = typer.Option(
+        False,
+        "--incremental",
+        help="Only add new repositories, keep existing ones",
+    ),
 ):
     """Collect starred repositories from GitHub.
 
     This command fetches all repositories starred by the configured GitHub user.
     """
     try:
+        # Load existing repos if incremental
+        existing_repos = {}
+        if incremental and output_file.exists():
+            existing_data = json.loads(output_file.read_text(encoding="utf-8"))
+            existing_repos = {r["repo_name"]: r for r in existing_data}
+            console.print(f"Found [bold]{len(existing_repos)}[/bold] existing repositories")
+
         # Run collection
         repos = asyncio.run(_collect_repos())
+        
+        # Merge with existing if incremental
+        if incremental:
+            new_count = 0
+            for repo in repos:
+                repo_name = repo.get("repo_name")
+                if repo_name not in existing_repos:
+                    existing_repos[repo_name] = repo
+                    new_count += 1
+            
+            repos = list(existing_repos.values())
+            console.print(f"Added [bold]{new_count}[/bold] new repositories")
 
         # Save to file
         output_file.write_text(json.dumps(repos, indent=2), encoding="utf-8")
