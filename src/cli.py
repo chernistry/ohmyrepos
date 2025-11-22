@@ -248,30 +248,27 @@ def collect(
     try:
         # Load existing repos if incremental
         existing_repos = {}
+        existing_names = None
         if incremental and output_file.exists():
             existing_data = json.loads(output_file.read_text(encoding="utf-8"))
             existing_repos = {r["repo_name"]: r for r in existing_data}
+            existing_names = set(existing_repos.keys())
             console.print(f"Found [bold]{len(existing_repos)}[/bold] existing repositories")
 
-        # Run collection
-        repos = asyncio.run(_collect_repos())
+        # Run collection (pass existing names to skip during collection)
+        new_repos = asyncio.run(_collect_repos(existing_names))
         
         # Merge with existing if incremental
         if incremental:
-            new_count = 0
-            for repo in repos:
-                repo_name = repo.get("repo_name")
-                if repo_name not in existing_repos:
-                    existing_repos[repo_name] = repo
-                    new_count += 1
-            
-            repos = list(existing_repos.values())
-            console.print(f"Added [bold]{new_count}[/bold] new repositories")
+            console.print(f"Added [bold]{len(new_repos)}[/bold] new repositories")
+            repos = list(existing_repos.values()) + new_repos
+        else:
+            repos = new_repos
 
         # Save to file
         output_file.write_text(json.dumps(repos, indent=2), encoding="utf-8")
         console.print(
-            f"Collected [bold]{len(repos)}[/bold] repositories to [bold]{output_file}[/bold]"
+            f"Total [bold]{len(repos)}[/bold] repositories in [bold]{output_file}[/bold]"
         )
 
     except Exception as e:
@@ -279,8 +276,11 @@ def collect(
         sys.exit(1)
 
 
-async def _collect_repos() -> List[Dict[str, Any]]:
+async def _collect_repos(existing_names: Optional[set] = None) -> List[Dict[str, Any]]:
     """Collect repositories using the RepoCollector.
+
+    Args:
+        existing_names: Set of existing repo names to skip
 
     Returns:
         List of repository data
@@ -288,8 +288,10 @@ async def _collect_repos() -> List[Dict[str, Any]]:
     collector = RepoCollector()
     try:
         repos = []
-        async for repo in collector.collect_starred_repos():
-            repos.append(repo.model_dump() if hasattr(repo, 'model_dump') else repo)
+        async for repo in collector.collect_starred_repos(skip_existing=existing_names):
+            repo_dict = repo.model_dump() if hasattr(repo, 'model_dump') else repo
+            repos.append(repo_dict)
+        
         return repos
     finally:
         await collector.close()

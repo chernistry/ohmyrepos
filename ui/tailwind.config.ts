@@ -9,12 +9,20 @@ const config: Config = {
     theme: {
         extend: {
             colors: {
-                background: '#0a0a0a',
-                surface: '#111111',
-                border: '#333333',
-                primary: '#EDEDED',
-                secondary: '#A1A1A1',
-                accent: '#3B82F6',
+                background: '#1e1e1e',
+                surface: '#252526',
+                border: '#3e3e3e',
+                primary: '#d4d4d4',
+                secondary: '#808080',
+                accent: '#569cd6',
+                'vs-blue': '#569cd6',
+                'vs-light-blue': '#9cdcfe',
+                'vs-cyan': '#4ec9b0',
+                'vs-yellow': '#dcdcaa',
+                'vs-orange': '#ce9178',
+                'vs-green': '#7ca668',
+                'vs-purple': '#c586c0',
+                'vs-red': '#f44747',
             },
             fontFamily: {
                 sans: ['var(--font-inter)'],

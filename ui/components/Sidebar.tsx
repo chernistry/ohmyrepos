@@ -9,8 +9,6 @@ import { AddRepoModal } from './AddRepoModal';
 
 const NAV_ITEMS = [
     { label: 'Discover', icon: MagnifyingGlass, href: '/' },
-    { label: 'Collections', icon: Stack, href: '/collections' },
-    { label: 'Settings', icon: Gear, href: '/settings' },
 ];
 
 export function Sidebar() {

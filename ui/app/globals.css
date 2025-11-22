@@ -1,9 +1,21 @@
 @import "tailwindcss";
 
 :root {
-  --foreground-rgb: 237, 237, 237;
-  --background-start-rgb: 10, 10, 10;
-  --background-end-rgb: 10, 10, 10;
+  --foreground-rgb: 212, 212, 212;
+  --background-start-rgb: 30, 30, 30;
+  --background-end-rgb: 30, 30, 30;
+  
+  /* VS Dark palette */
+  --vs-blue: #569cd6;
+  --vs-light-blue: #9cdcfe;
+  --vs-cyan: #4ec9b0;
+  --vs-yellow: #dcdcaa;
+  --vs-orange: #ce9178;
+  --vs-green: #7ca668;
+  --vs-purple: #c586c0;
+  --vs-red: #f44747;
+  --vs-gray: #808080;
+  --vs-dark-gray: #3e3e3e;
 }
 
 body {

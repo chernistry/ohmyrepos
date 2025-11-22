@@ -165,12 +165,14 @@ class RepoCollector:
         self,
         username: Optional[str] = None,
         progress_callback: Optional[callable] = None,
+        skip_existing: Optional[set] = None,
     ) -> AsyncGenerator[RepositoryData, None]:
         """Collect starred repositories with streaming processing.
 
         Args:
             username: GitHub username (defaults to config)
             progress_callback: Optional progress callback function
+            skip_existing: Set of repo names to skip (for incremental updates)
 
         Yields:
             Repository data objects
@@ -187,6 +189,12 @@ class RepoCollector:
         try:
             # Stream repositories in chunks for memory efficiency
             async for repo_batch in self._fetch_repos_chunked(username):
+                # Filter out existing repos before enrichment
+                if skip_existing:
+                    repo_batch = [r for r in repo_batch if r.get("full_name") not in skip_existing]
+                    if not repo_batch:
+                        continue
+                
                 # Process batch concurrently
                 if self.enable_readme_fetch:
                     tasks = [
