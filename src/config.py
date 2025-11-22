@@ -140,11 +140,19 @@ class QdrantConfig(BaseModel):
         return v
 
 
+class EmbeddingProviderType(str, Enum):
+    """Supported embedding providers."""
+
+    JINA = "jina"
+    OLLAMA = "ollama"
+
+
 class EmbeddingConfig(BaseModel):
     """Embedding provider configuration."""
 
+    provider: EmbeddingProviderType = Field(default=EmbeddingProviderType.JINA)
     model: str = Field(default="jina-embeddings-v3")
-    api_key: SecretStr = Field(..., description="Embedding API key")
+    api_key: Optional[SecretStr] = Field(default=None, description="Embedding API key")
     base_url: HttpUrl = Field(default="https://api.jina.ai/v1/embeddings")
     batch_size: int = Field(default=32, ge=1, le=100)
     timeout: int = Field(default=30, ge=5, le=300)
@@ -285,11 +293,29 @@ class Settings(BaseSettings):
 
         # Handle Embedding config
         if not self.embedding:
-            embedding_key = self.EMBEDDING_MODEL_API_KEY or os.getenv(
-                "EMBEDDING_MODEL_API_KEY", ""
+            provider_str = os.getenv("EMBEDDINGS_SERVICE", "jina").lower()
+            try:
+                provider = EmbeddingProviderType(provider_str)
+            except ValueError:
+                provider = EmbeddingProviderType.JINA
+
+            # Default settings for each provider
+            if provider == EmbeddingProviderType.OLLAMA:
+                model = os.getenv("EMBEDDING_MODEL", "embeddinggemma:latest")
+                base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/api/embeddings")
+                api_key = None
+            else:
+                model = os.getenv("EMBEDDING_MODEL", "jina-embeddings-v3")
+                base_url = os.getenv("EMBEDDING_MODEL_URL", "https://api.jina.ai/v1/embeddings")
+                api_key_val = self.EMBEDDING_MODEL_API_KEY or os.getenv("EMBEDDING_MODEL_API_KEY", "")
+                api_key = SecretStr(api_key_val) if api_key_val else None
+
+            self.embedding = EmbeddingConfig(
+                provider=provider,
+                model=model,
+                base_url=base_url,
+                api_key=api_key
             )
-            if embedding_key:
-                self.embedding = EmbeddingConfig(api_key=SecretStr(embedding_key))
 
         # Handle Reranker config (use same key as embedding for simplicity)
         if not self.reranker:
@@ -362,8 +388,10 @@ class Settings(BaseSettings):
 
         if not self.embedding:
             errors.append("Embedding configuration is required")
-        elif not self.embedding.api_key.get_secret_value():
-            errors.append("Embedding API key is required")
+        elif self.embedding.provider == EmbeddingProviderType.JINA and (
+            not self.embedding.api_key or not self.embedding.api_key.get_secret_value()
+        ):
+            errors.append("Embedding API key is required for Jina provider")
 
         if self.llm and self.llm.provider == LLMProvider.OPENAI and (
             not self.llm.api_key or not self.llm.api_key.get_secret_value()

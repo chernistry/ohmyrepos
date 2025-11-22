@@ -188,7 +188,7 @@ class IngestionPipeline:
             existing_names = set(existing)
             logger.info(f"Found {len(existing_names)} existing repositories in Qdrant")
             
-            repos = [r for r in repos if r.get("full_name") not in existing_names]
+            repos = [r for r in repos if r.get("repo_name") not in existing_names]
             logger.info(f"Filtered to {len(repos)} new repositories (skipped {total_loaded - len(repos)} existing)")
 
         if not repos:
@@ -200,7 +200,7 @@ class IngestionPipeline:
         total_to_process = len(repos)
         
         for idx, repo in enumerate(repos, 1):
-            repo_name = repo.get("full_name", "unknown")
+            repo_name = repo.get("repo_name", "unknown")
             logger.info(f"Processing {idx}/{total_to_process}: {repo_name}")
             
             if "summary" not in repo or not repo["summary"]:

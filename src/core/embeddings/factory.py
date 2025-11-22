@@ -7,9 +7,10 @@ import logging
 import os
 from typing import Dict, Type, Optional
 
-from src.config import settings
+from src.config import settings, EmbeddingProviderType
 from src.core.embeddings.base import EmbeddingProvider, EmbeddingConfig
 from src.core.embeddings.providers.jina import JinaEmbeddingProvider
+from src.core.embeddings.providers.ollama import OllamaEmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +22,9 @@ class EmbeddingFactory:
     """
 
     # Registry of available embedding providers
-    _providers: Dict[str, Type[EmbeddingProvider]] = {
-        "jina-embeddings-v3": JinaEmbeddingProvider,
-        "jina-embeddings-v2": JinaEmbeddingProvider,
+    _providers: Dict[EmbeddingProviderType, Type[EmbeddingProvider]] = {
+        EmbeddingProviderType.JINA: JinaEmbeddingProvider,
+        EmbeddingProviderType.OLLAMA: OllamaEmbeddingProvider,
     }
 
     @classmethod
@@ -48,50 +49,30 @@ class EmbeddingFactory:
         Raises:
             ValueError: If the provider is not supported
         """
-        # Resolve configuration in priority order: explicit args -> settings -> env
-        if not model_name:
-            if settings.embedding and getattr(settings.embedding, "model", None):
-                model_name = settings.embedding.model
-            else:
-                model_name = os.getenv("EMBEDDING_MODEL", "jina-embeddings-v3")
+        # Get configuration from settings if not provided
+        config = settings.embedding
+        
+        if not config:
+             raise ValueError("Embedding configuration is missing")
 
-        if not api_key:
-            if settings.embedding and getattr(settings.embedding, "api_key", None):
-                try:
-                    api_key = settings.embedding.api_key.get_secret_value()
-                except Exception:
-                    api_key = None
-            api_key = api_key or os.getenv("EMBEDDING_MODEL_API_KEY", "")
+        provider_type = config.provider
+        
+        # Override with explicit arguments if provided
+        if model_name:
+            config.model = model_name
+        if api_key:
+            config.api_key = api_key
+        if api_url:
+            config.base_url = api_url
 
-        if not api_url:
-            if settings.embedding and getattr(settings.embedding, "base_url", None):
-                api_url = str(settings.embedding.base_url)
-            else:
-                api_url = os.getenv(
-                    "EMBEDDING_MODEL_URL", "https://api.jina.ai/v1/embeddings"
-                )
-
-        # Find provider class based on model name
-        provider_class = None
-        for prefix, cls in cls._providers.items():
-            if model_name.startswith(prefix):
-                provider_class = cls
-                break
+        provider_class = cls._providers.get(provider_type)
 
         if not provider_class:
-            raise ValueError(f"Unsupported embedding model: {model_name}")
-
-        # Create configuration
-        config = EmbeddingConfig(
-            model_name=model_name,
-            api_key=api_key,
-            api_url=api_url,
-            **kwargs,
-        )
+            raise ValueError(f"Unsupported embedding provider: {provider_type}")
 
         # Create provider instance
         provider = provider_class(config=config)
-        logger.debug(f"Created embedding provider for model: {model_name}")
+        logger.debug(f"Created embedding provider: {provider_type} with model: {config.model}")
 
         return provider
 

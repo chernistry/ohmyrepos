@@ -121,8 +121,8 @@ class RepoSummarizer:
                 result["tags"] = cleaned_tags[:20]  # Limit to max 20 tags
 
             # Add original repo data
-            result["repo_name"] = repo_data.get("name", "")
-            result["repo_url"] = repo_data.get("html_url", "")
+            result["repo_name"] = repo_data.get("repo_name") or repo_data.get("full_name") or repo_data.get("name", "")
+            result["repo_url"] = repo_data.get("repo_url") or repo_data.get("html_url", "")
 
             return result
         except Exception as e:

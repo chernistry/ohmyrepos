@@ -36,6 +36,7 @@ try:
         Environment = main_config.Environment
         LogLevel = main_config.LogLevel
         LLMProvider = main_config.LLMProvider
+        EmbeddingProviderType = main_config.EmbeddingProviderType
         get_settings = main_config.get_settings
         
         # Use the main config system
@@ -61,6 +62,7 @@ except (ImportError, AttributeError) as e:
     Environment = str
     LogLevel = str
     LLMProvider = str
+    EmbeddingProviderType = str
     get_settings = get_production_settings
 
 __all__ = [
@@ -80,5 +82,6 @@ __all__ = [
     "Environment",
     "LogLevel",
     "LLMProvider",
+    "EmbeddingProviderType",
     "get_settings",
 ]
