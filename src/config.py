@@ -301,21 +301,29 @@ class Settings(BaseSettings):
 
             # Default settings for each provider
             if provider == EmbeddingProviderType.OLLAMA:
-                model = os.getenv("EMBEDDING_MODEL", "embeddinggemma:latest")
+                model = os.getenv("OLLAMA_EMBEDDING_MODEL", os.getenv("EMBEDDING_MODEL", "embeddinggemma:latest"))
+                # If the model name looks like a Jina model but we are using Ollama, fallback to default
+                if "jina" in model.lower() and "ollama" not in model.lower():
+                     model = "embeddinggemma:latest"
+                
                 base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/api/embeddings")
                 api_key = None
             else:
                 model = os.getenv("EMBEDDING_MODEL", "jina-embeddings-v3")
                 base_url = os.getenv("EMBEDDING_MODEL_URL", "https://api.jina.ai/v1/embeddings")
                 api_key_val = self.EMBEDDING_MODEL_API_KEY or os.getenv("EMBEDDING_MODEL_API_KEY", "")
-                api_key = SecretStr(api_key_val) if api_key_val else None
-
+                api_key = SecretStr(api_key_val)
+            # Initialize embedding config (dimension will be auto-detected)
             self.embedding = EmbeddingConfig(
                 provider=provider,
                 model=model,
-                base_url=base_url,
-                api_key=api_key
+                api_key=api_key,
+                base_url=base_url
             )
+            
+            # Update collection name to include provider to avoid dimension mismatch
+            if self.qdrant.collection_name == "repositories":
+                self.qdrant.collection_name = f"repositories_{provider.value}"
 
         # Handle Reranker config (use same key as embedding for simplicity)
         if not self.reranker:

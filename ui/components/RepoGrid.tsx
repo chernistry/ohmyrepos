@@ -1,6 +1,7 @@
 'use client';
 import { RepoCard, RepoProps } from './RepoCard';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useState, useEffect } from 'react';
 
 // Mock data for now
 const MOCK_REPOS: RepoProps[] = [
@@ -55,21 +56,76 @@ interface RepoGridProps {
 }
 
 export function RepoGrid({ query }: RepoGridProps) {
-    // Simple client-side filter for mock data
-    const filteredRepos = MOCK_REPOS.filter(repo =>
-        repo.name.toLowerCase().includes(query.toLowerCase()) ||
-        repo.description.toLowerCase().includes(query.toLowerCase())
-    );
+    const [repos, setRepos] = useState<RepoProps[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchRepos = async () => {
+            setLoading(true);
+            try {
+                let data;
+                if (!query) {
+                    // Fetch random repos
+                    const res = await fetch('http://127.0.0.1:8000/api/v1/random?limit=12');
+                    if (!res.ok) throw new Error('Failed to fetch random repos');
+                    data = await res.json();
+                } else {
+                    // Search repos
+                    const res = await fetch('http://127.0.0.1:8000/api/v1/search', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query, limit: 12 })
+                    });
+                    if (!res.ok) throw new Error('Failed to search repos');
+                    const response = await res.json();
+                    data = response.results;
+                }
+
+                // Map API response to RepoProps
+                const mappedRepos = data.map((repo: any, index: number) => ({
+                    id: repo.url || `repo-${index}`,
+                    owner: repo.full_name.split('/')[0] || 'unknown',
+                    name: repo.repo_name,
+                    description: repo.description || repo.summary || '',
+                    stars: repo.stars,
+                    language: repo.language || 'Unknown',
+                    updatedAt: 'Recently', // API doesn't return this yet
+                    topics: repo.tags || [],
+                    url: repo.url
+                }));
+
+                setRepos(mappedRepos);
+            } catch (error) {
+                console.error('Error fetching repositories:', error);
+                setRepos([]);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        const timeoutId = setTimeout(fetchRepos, query ? 500 : 0);
+        return () => clearTimeout(timeoutId);
+    }, [query]);
+
+    if (loading) {
+        return (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-20">
+                {[...Array(6)].map((_, i) => (
+                    <div key={i} className="h-64 bg-white/5 rounded-xl animate-pulse" />
+                ))}
+            </div>
+        );
+    }
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-20">
             <AnimatePresence mode='popLayout'>
-                {filteredRepos.map((repo, index) => (
+                {repos.map((repo, index) => (
                     <RepoCard key={repo.id} repo={repo} index={index} />
                 ))}
             </AnimatePresence>
 
-            {filteredRepos.length === 0 && (
+            {repos.length === 0 && (
                 <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}

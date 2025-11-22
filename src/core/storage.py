@@ -218,7 +218,36 @@ class QdrantStore(LoggerMixin):
                 if self.collection_name not in collection_names:
                     self.logger.info(f"Creating collection: {self.collection_name}")
                     
-                    # Create collection with optimized settings
+                    # Auto-detect embedding dimension from provider
+                    from src.core.embeddings.factory import EmbeddingFactory
+                    
+                    # Get API key for provider
+                    api_key = None
+                    try:
+                        if settings.embedding and settings.embedding.api_key:
+                            api_key = settings.embedding.api_key.get_secret_value()
+                    except Exception:
+                        api_key = None
+                    api_key = api_key or os.getenv("EMBEDDING_MODEL_API_KEY")
+                    
+                    if not api_key:
+                        raise StorageError(
+                            "Embedding API key missing. Cannot auto-detect dimension. "
+                            "Set settings.embedding or EMBEDDING_MODEL_API_KEY."
+                        )
+                    
+                    # Create provider and detect dimension
+                    embedding_provider = EmbeddingFactory.get_provider(api_key=api_key)
+                    try:
+                        detected_dimension = await embedding_provider.detect_dimension()
+                        self.logger.info(f"Auto-detected embedding dimension: {detected_dimension}")
+                        
+                        # Update config with detected dimension
+                        self.config.vector_size = detected_dimension
+                    finally:
+                        await embedding_provider.close()
+                    
+                    # Create collection with detected dimension
                     await self._client.create_collection(
                         collection_name=self.collection_name,
                         vectors_config=qdrant_models.VectorParams(
@@ -637,6 +666,60 @@ class QdrantStore(LoggerMixin):
         except Exception as e:
             log_exception(self.logger, e, "Failed to get existing repositories")
             return set()
+
+    async def get_random_repositories(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get random repositories from the collection.
+        
+        Uses a random vector search to efficiently sample repositories.
+        
+        Args:
+            limit: Number of repositories to return
+            
+        Returns:
+            List of repository dictionaries
+        """
+        if not self._initialized:
+            await self.initialize()
+            
+        try:
+            # Generate a random vector of the correct dimension
+            # We can get dimension from collection info or config
+            # For now, we'll try to get it from the collection info
+            collection_info = await self._client.get_collection(self.collection_name)
+            vector_size = collection_info.config.params.vectors.size
+            
+            import numpy as np
+            random_vector = np.random.rand(vector_size).tolist()
+            
+            # Search with random vector
+            results = await self._client.search(
+                collection_name=self.collection_name,
+                query_vector=random_vector,
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+            
+            # Convert to dictionary results
+            repos = []
+            for hit in results:
+                repo = {
+                    "repo_name": hit.payload.get("repo_name", ""),
+                    "repo_url": hit.payload.get("repo_url", ""),
+                    "summary": hit.payload.get("summary"),
+                    "description": hit.payload.get("description"),
+                    "tags": hit.payload.get("tags", []),
+                    "language": hit.payload.get("language"),
+                    "stars": hit.payload.get("stars", 0),
+                    "updated_at": hit.payload.get("updated_at"),
+                }
+                repos.append(repo)
+                
+            return repos
+            
+        except Exception as e:
+            log_exception(self.logger, e, "Failed to get random repositories")
+            return []
 
     async def health_check(self) -> Dict[str, Any]:
         """Perform health check on the Qdrant store.

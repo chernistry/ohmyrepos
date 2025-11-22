@@ -21,8 +21,12 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
             config: Embedding configuration (Pydantic model or EmbeddingConfig object)
         """
         self.config = config
+        base_url = str(config.base_url).rstrip("/")
+        if not base_url.endswith("/api/embeddings"):
+            base_url = f"{base_url}/api/embeddings"
+
         self.client = httpx.AsyncClient(
-            base_url=str(config.base_url),
+            base_url=base_url,
             timeout=config.timeout,
             follow_redirects=True,
         )
@@ -67,6 +71,22 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
             logger.info(f"Detected embedding dimension: {self._dimension}")
             
         return embedding
+
+    async def detect_dimension(self) -> int:
+        """Auto-detect the embedding dimension by generating a test embedding.
+        
+        Returns:
+            Detected embedding dimension
+        """
+        if self._dimension is not None and self._dimension > 0:
+            return self._dimension
+            
+        logger.info("Auto-detecting embedding dimension...")
+        test_embedding = await self._embed_single("test")
+        self._dimension = len(test_embedding)
+        logger.info(f"Detected embedding dimension: {self._dimension}")
+        return self._dimension
+
 
     @retry(
         stop=stop_after_attempt(3),

@@ -52,12 +52,12 @@ class JinaEmbeddingProvider(EmbeddingProvider):
         self.config = config or EmbeddingConfig(
             model_name=os.getenv("EMBEDDING_MODEL", "jina-embeddings-v3"),
             api_key=os.getenv("EMBEDDING_MODEL_API_KEY", ""),
-            api_url=os.getenv("EMBEDDING_MODEL_URL", "https://api.jina.ai/v1/embeddings"),
+            base_url=os.getenv("EMBEDDING_MODEL_URL", "https://api.jina.ai/v1/embeddings"),
         )
 
-        self.api_url = self.config.api_url or "https://api.jina.ai/v1/embeddings"
+        self.api_url = str(self.config.base_url) or "https://api.jina.ai/v1/embeddings"
         self.api_key = self.config.api_key
-        self.model_name = self.config.model_name
+        self.model_name = self.config.model
 
         if not self.api_key:
             raise ValueError("Jina AI API key is required")
@@ -81,8 +81,8 @@ class JinaEmbeddingProvider(EmbeddingProvider):
         )
 
         # Set default dimension based on model
-        if self.config.dimensions is not None:
-            self._dimension = self.config.dimensions
+        if self.config.dimension is not None:
+            self._dimension = self.config.dimension
         elif "v3" in self.model_name:
             self._dimension = 1024  # jina-embeddings-v3 uses 1024 dimensions
         else:
@@ -101,8 +101,35 @@ class JinaEmbeddingProvider(EmbeddingProvider):
         Returns:
             List of embedding values
         """
-        embeddings = await self.embed_documents([text])
+        embeddings = await self._generate_embeddings([text])
         return embeddings[0]
+
+    async def detect_dimension(self) -> int:
+        """Auto-detect the embedding dimension by generating a test embedding.
+        
+        Returns:
+            Detected embedding dimension
+        """
+        if self._dimension is not None and self._dimension > 0:
+            return self._dimension
+            
+        logger.info("Auto-detecting embedding dimension...")
+        embeddings = await self._generate_embeddings(["test"])
+        if embeddings and len(embeddings) > 0:
+            self._dimension = len(embeddings[0])
+            logger.info(f"Detected embedding dimension: {self._dimension}")
+        return self._dimension
+
+    async def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """Embed multiple documents.
+
+        Args:
+            texts: List of texts to embed
+
+        Returns:
+            List of embedding vectors
+        """
+        return await self._generate_embeddings(texts)
 
     @retry(
         stop=stop_after_attempt(3),
@@ -177,7 +204,7 @@ class JinaEmbeddingProvider(EmbeddingProvider):
                 embeddings.append(item["embedding"])
 
             # Update dimension if not set
-            if self.config.dimensions is None and embeddings:
+            if self.config.dimension is None and embeddings:
                 self._dimension = len(embeddings[0])
                 logger.info(f"Detected embedding dimension: {self._dimension}")
 

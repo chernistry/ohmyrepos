@@ -200,7 +200,7 @@ class IngestionPipeline:
         total_to_process = len(repos)
         
         for idx, repo in enumerate(repos, 1):
-            repo_name = repo.get("repo_name", "unknown")
+            repo_name = repo.get("repo_name") or repo.get("full_name") or repo.get("name", "unknown")
             logger.info(f"Processing {idx}/{total_to_process}: {repo_name}")
             
             if "summary" not in repo or not repo["summary"]:
@@ -211,12 +211,19 @@ class IngestionPipeline:
                 logger.info(f"  → Using existing summary for {repo_name}")
                 repos_to_store.append(repo)
 
-        # Store in Qdrant
-        logger.info(f"Storing {len(repos_to_store)} repositories in Qdrant...")
-        await self.qdrant_store.store_repositories(repos_to_store)
+            # Batch storage to avoid data loss on interruption
+            if len(repos_to_store) >= 50:
+                logger.info(f"Storing batch of {len(repos_to_store)} repositories...")
+                await self.qdrant_store.store_repositories(repos_to_store)
+                repos_to_store = []
 
-        logger.info(f"✓ Successfully indexed {len(repos_to_store)} repositories")
-        return repos_to_store
+        # Store remaining repositories
+        if repos_to_store:
+            logger.info(f"Storing final batch of {len(repos_to_store)} repositories...")
+            await self.qdrant_store.store_repositories(repos_to_store)
+            
+        logger.info(f"✓ Successfully indexed {len(repos)} repositories")
+        return repos
 
     async def close(self):
         """Close the pipeline."""

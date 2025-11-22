@@ -131,3 +131,43 @@ async def search(request: SearchRequest, req: Request = None):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Search failed: {str(e)}",
         )
+
+
+@router.get(
+    "/random",
+    response_model=List[RepoResult],
+    status_code=status.HTTP_200_OK,
+)
+async def get_random(limit: int = 10):
+    """Get random repositories."""
+    if not settings.qdrant:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Search service not configured",
+        )
+
+    try:
+        qdrant_store = QdrantStore()
+        await qdrant_store.initialize()
+        
+        results = await qdrant_store.get_random_repositories(limit=limit)
+        
+        return [
+            RepoResult(
+                repo_name=r.get("repo_name", ""),
+                full_name=r.get("repo_name", ""), # Use repo_name as full_name fallback
+                description=r.get("description"),
+                summary=r.get("summary"),
+                tags=r.get("tags", []),
+                language=r.get("language"),
+                stars=r.get("stars", 0),
+                url=r.get("repo_url", ""),
+                score=0.0, # No score for random
+            )
+            for r in results
+        ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get random repositories: {str(e)}",
+        )

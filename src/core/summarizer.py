@@ -82,7 +82,8 @@ class RepoSummarizer:
             )
 
         # Generate summary
-        logger.info(f"Summarizing repository: {repo_data.get('name', 'unknown')}")
+        repo_name = repo_data.get("repo_name") or repo_data.get("full_name") or repo_data.get("name", "unknown")
+        logger.info(f"Summarizing repository: {repo_name}")
         try:
             # Build prompt for debugging
             if self.debug:
