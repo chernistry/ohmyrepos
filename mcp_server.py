@@ -68,7 +68,7 @@ def format_results(results: List[Dict[str, Any]], limit: int = 5) -> str:
         tags = repo.get("tags") or repo.get("topics") or []
         tag_str = ", ".join(tags) if tags else ""
         lines.append(
-            f"[{idx}] {name} ({language}) ⭐ {stars}\nSummary: {summary}\nTags: {tag_str}".strip()
+            f"[{idx}] {name} ({language}) stars={stars}\nSummary: {summary}\nTags: {tag_str}".strip()
         )
     return "\n\n".join(lines) if lines else "No results"
 

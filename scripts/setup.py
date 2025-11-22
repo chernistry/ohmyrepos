@@ -21,6 +21,31 @@ from typing import Dict, Optional
 ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = ROOT / ".env"
 
+# ANSI colors
+BLUE = "\033[94m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+RED = "\033[91m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
+
+def info(msg: str) -> None:
+    print(f"{BLUE}ℹ{RESET} {msg}")
+
+def success(msg: str) -> None:
+    print(f"{GREEN}✓{RESET} {msg}")
+
+def warning(msg: str) -> None:
+    print(f"{YELLOW}⚠{RESET} {msg}")
+
+def error(msg: str) -> None:
+    print(f"{RED}✗{RESET} {msg}")
+
+def header(msg: str) -> None:
+    print(f"\n{BOLD}{BLUE}{'='*60}{RESET}")
+    print(f"{BOLD}{BLUE}{msg.center(60)}{RESET}")
+    print(f"{BOLD}{BLUE}{'='*60}{RESET}\n")
+
 REQUIRED_KEYS = [
     "GITHUB_USERNAME",
     "GITHUB_TOKEN",
@@ -75,7 +100,7 @@ def write_env(env: Dict[str, str]) -> None:
             continue
         lines.append(f"{key}={val}")
     ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"[ok] Wrote environment to {ENV_PATH}")
+    success(f"Wrote environment to {ENV_PATH}")
 
 
 def input_with_timeout(prompt: str, default: str, timeout: int = 10) -> str:
@@ -96,7 +121,7 @@ def input_with_timeout(prompt: str, default: str, timeout: int = 10) -> str:
 def prompt(key: str, message: str, default: Optional[str] = None, secret: bool = False, timeout: Optional[int] = None) -> str:
     existing = os.getenv(key) or env.get(key)
     if existing:
-        print(f"{key} already set, keeping existing value.")
+        info(f"{key} already set, keeping existing value.")
         return existing
 
     if timeout is not None:
@@ -115,12 +140,12 @@ def ensure_ollama_model(model: str) -> None:
     try:
         listed = subprocess.check_output(["ollama", "list"], text=True)
         if model in listed:
-            print(f"[ok] Ollama model '{model}' already present.")
+            success(f"Ollama model '{model}' already present.")
             return
     except Exception:
         pass
 
-    print(f"[info] Pulling Ollama model '{model}' (one-time)...")
+    info(f"Pulling Ollama model '{model}' (one-time)...")
     subprocess.run(["ollama", "pull", model], check=False)
 
 
@@ -129,7 +154,7 @@ def run_cmd(cmd: list[str], cwd: Path = ROOT, label: str = "") -> bool:
     print(f"{label_prefix}running: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=cwd)
     if result.returncode != 0:
-        print(f"[warn] command failed with exit code {result.returncode}")
+        warning(f"command failed with exit code {result.returncode}")
         return False
     return True
 
@@ -216,7 +241,7 @@ def run_ingestion() -> None:
 
 if __name__ == "__main__":
     env = read_env(ENV_PATH)
-    print(f"[info] Using repository root: {ROOT}")
+    info(f"Using repository root: {ROOT}")
     configure_embeddings(env)
     configure_required(env)
     write_env(env)

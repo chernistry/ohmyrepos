@@ -43,6 +43,8 @@ cd ui && npm install && cd ..
 cp .env.example .env
 ./run.sh setup   # collects keys, pulls embedding model if needed, runs collect+embed
 ```
+> [!WARNING]
+> Ingestion triggers embedding/LLM calls; start with a small repo set while validating.
 
 3) Run locally
 ```bash
