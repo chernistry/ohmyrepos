@@ -268,6 +268,9 @@ class RepoSummarizer:
         already_processed = []
 
         for repo in repos:
+            if not isinstance(repo, dict):
+                logger.warning(f"Skipping non-dict repo entry: {type(repo)}")
+                continue
             raw_name = (
                 repo.get("repo_name")
                 or repo.get("full_name")
@@ -317,10 +320,10 @@ class RepoSummarizer:
                     continue
 
             # Check if the repository already has a valid summary and tags in current data
+            summary_val = repo.get("summary")
             has_summary = (
-                repo.get("summary")
-                and isinstance(repo.get("summary"), str)
-                and len(repo.get("summary", "")) > 10
+                isinstance(summary_val, str)
+                and len(summary_val) > 10
             )
             has_tags = (
                 repo.get("tags")
@@ -333,7 +336,12 @@ class RepoSummarizer:
             logger.debug(
                 f"Repo {repo_name}: has_summary={has_summary}, has_tags={has_tags}, has_error={has_error}"
             )
-            logger.debug(f"Summary: {repo.get('summary', 'None')[:50]}...")
+            summary_preview = repo.get("summary")
+            if summary_preview:
+                summary_preview = str(summary_preview)[:50]
+            else:
+                summary_preview = "None"
+            logger.debug(f"Summary: {summary_preview}...")
             logger.debug(f"Tags: {repo.get('tags', [])}")
 
             if (

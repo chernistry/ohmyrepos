@@ -124,6 +124,10 @@ case "$1" in
   mcp)
     run_mcp
     ;;
+  agent)
+    cd "$ROOT_DIR"
+    $PYTHON_BIN -m src.cli agent "${@:2}"
+    ;;
   *)
     echo "Usage:"
     echo "  ./run.sh dev           # Start backend + frontend (local dev)"
@@ -133,6 +137,7 @@ case "$1" in
     echo "  ./run.sh stack logs    # Tail Docker stack logs"
     echo "  ./run.sh setup         # Interactive setup + optional ingestion"
     echo "  ./run.sh mcp           # Start MCP server (stdio transport)"
+    echo "  ./run.sh agent ...     # Run agent commands (e.g. discover)"
     exit 1
     ;;
 esac

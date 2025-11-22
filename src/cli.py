@@ -31,7 +31,40 @@ logging.basicConfig(
 logger = logging.getLogger("ohmyrepos")
 console = Console()
 
+from src.agent.discovery import discover as run_discovery
+
 app = typer.Typer(help="Oh My Repos CLI")
+agent_app = typer.Typer(help="GitHub Discovery Agent commands")
+app.add_typer(agent_app, name="agent")
+
+
+@agent_app.command("discover")
+def agent_discover(
+    repo_file: Path = typer.Option(
+        "repos.json",
+        "--input",
+        "-i",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="Path to JSON file with repositories data",
+    ),
+    max_results: int = typer.Option(
+        20,
+        "--max-results",
+        "-n",
+        help="Maximum number of repositories to recommend",
+    ),
+    category: Optional[str] = typer.Option(
+        None,
+        "--category",
+        "-c",
+        help="Specific category to focus on",
+    ),
+):
+    """Discover new repositories based on your interests."""
+    run_discovery(repo_file, max_results, category)
 
 
 @app.command()
@@ -219,10 +252,9 @@ def generate_summary(
             console.print(f"\nSummary written to [bold]{output_file}[/bold]")
 
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.exception(f"Error: {e}")
         if debug:
             import traceback
-
             console.print(traceback.format_exc())
         sys.exit(1)
 
@@ -482,7 +514,11 @@ async def _process_repos(
         try:
             repos = []
             async for repo in collector.collect_starred_repos():
-                repos.append(repo)
+                # RepoCollector yields RepositoryData models; convert to dict
+                try:
+                    repos.append(repo.model_dump())
+                except Exception:
+                    repos.append(repo)
         finally:
             await collector.close()
 
@@ -509,6 +545,19 @@ async def _process_repos(
     console.print(f"Summarizing [bold]{len(repos)}[/bold] repositories")
     if concurrency:
         console.print(f"Using concurrency: [bold]{concurrency}[/bold]")
+
+    # Validate input list and drop invalid entries early
+    cleaned_repos: List[Dict[str, Any]] = []
+    for repo in repos:
+        if not isinstance(repo, dict):
+            logger.warning(f"Skipping invalid repo entry (type={type(repo)})")
+            continue
+        cleaned_repos.append(repo)
+
+    repos = cleaned_repos
+    if not repos:
+        console.print("[bold red]No valid repository entries to process[/bold red]")
+        return []
 
     summarizer = RepoSummarizer(debug=debug, concurrency=concurrency)
 
