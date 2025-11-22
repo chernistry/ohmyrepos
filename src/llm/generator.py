@@ -203,16 +203,38 @@ class LLMGenerator:
         async for chunk in stream_gen:
             chunk_count += 1
             try:
-                # Handle strongly-typed streaming chunks
-                if isinstance(chunk, dict):
+                # Handle strongly-typed StreamingChunk models (Pydantic) or dicts
+                # Provider streaming types (OpenAIProvider, OllamaProvider) both expose
+                # a `choices` list with a `delta` dict containing `content`.
+                choices = None
+
+                # Pydantic model or any object with `.choices`
+                if hasattr(chunk, "choices"):
+                    choices = getattr(chunk, "choices", None)
+                # Plain dict from an OpenAI-compatible client
+                elif isinstance(chunk, dict):
                     choices = chunk.get("choices", [])
-                    if choices:
-                        delta = choices[0].get("delta", {})
+
+                if choices:
+                    first_choice = choices[0]
+                    # Support both attribute (`.delta`) and dict (`['delta']`) access
+                    if hasattr(first_choice, "delta"):
+                        delta = getattr(first_choice, "delta", {}) or {}
+                    elif isinstance(first_choice, dict):
+                        delta = first_choice.get("delta", {}) or {}
+                    else:
+                        delta = {}
+
+                    if isinstance(delta, dict):
                         content = delta.get("content")
                         if content:
-                            logger.debug(f"Yielding content chunk {chunk_count}: {len(content)} chars")
+                            logger.debug(
+                                "Yielding content chunk %d: %d chars",
+                                chunk_count,
+                                len(content),
+                            )
                             yield content
-                    continue
+                            continue
 
                 # Fallback: raw SSE line strings
                 if isinstance(chunk, str):

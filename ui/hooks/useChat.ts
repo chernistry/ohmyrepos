@@ -36,20 +36,60 @@ export function useChat() {
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
+            let buffer = '';
             let assistantMessage = '';
+            let isDone = false;
 
-            while (true) {
+            while (!isDone) {
                 const { done, value } = await reader.read();
                 if (done) break;
 
-                const chunk = decoder.decode(value, { stream: true });
-                assistantMessage += chunk;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n\n');
+                buffer = lines.pop() || '';
 
-                setMessages(prev => {
-                    const newMessages = [...prev];
-                    newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantMessage };
-                    return newMessages;
-                });
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6);
+                        const trimmedData = data.trim();
+
+                        if (trimmedData === '[DONE]') {
+                            isDone = true;
+                            break;
+                        }
+
+                        let chunk: string | null = null;
+
+                        try {
+                            const parsed = JSON.parse(trimmedData);
+
+                            if (parsed?.error) {
+                                toast.error(parsed.error.message || 'Error generating response');
+                                isDone = true;
+                                break;
+                            }
+
+                            if (typeof parsed === 'string') {
+                                chunk = parsed;
+                            } else if (parsed?.chunk) {
+                                chunk = parsed.chunk;
+                            }
+                        } catch {
+                            // Not JSON, treat as plain text chunk
+                            chunk = data;
+                        }
+
+                        if (chunk) {
+                            assistantMessage += chunk;
+
+                            setMessages(prev => {
+                                const newMessages = [...prev];
+                                newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantMessage };
+                                return newMessages;
+                            });
+                        }
+                    }
+                }
             }
         } catch (error: any) {
             if (error.name !== 'AbortError') {

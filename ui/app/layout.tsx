@@ -19,7 +19,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.variable} ${jetbrainsMono.variable} bg-background text-primary flex h-screen overflow-hidden selection:bg-accent/30`}>
+      <body suppressHydrationWarning className={`${inter.variable} ${jetbrainsMono.variable} bg-background text-primary flex h-screen overflow-hidden selection:bg-accent/30`}>
         <Sidebar />
         <main className="flex-1 relative overflow-y-auto scrollbar-hide">
           {children}

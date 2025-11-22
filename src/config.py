@@ -157,7 +157,7 @@ class EmbeddingConfig(BaseModel):
     batch_size: int = Field(default=32, ge=1, le=100)
     timeout: int = Field(default=30, ge=5, le=300)
     max_retries: int = Field(default=3, ge=0, le=10)
-    dimension: int = Field(default=1024, ge=128, le=4096)
+    dimension: Optional[int] = Field(default=None, description="Embedding dimension (auto-detected if None)")
 
 
 class RerankerConfig(BaseModel):

@@ -217,6 +217,7 @@ class QdrantStore(LoggerMixin):
 
                 if self.collection_name not in collection_names:
                     self.logger.info(f"Creating collection: {self.collection_name}")
+                    self.logger.info(f"Current vector_size from config: {self.config.vector_size}")
                     
                     # Auto-detect embedding dimension from provider
                     from src.core.embeddings.factory import EmbeddingFactory
@@ -226,28 +227,40 @@ class QdrantStore(LoggerMixin):
                     try:
                         if settings.embedding and settings.embedding.api_key:
                             api_key = settings.embedding.api_key.get_secret_value()
-                    except Exception:
+                    except Exception as e:
+                        self.logger.warning(f"Failed to get API key from settings.embedding: {e}")
                         api_key = None
                     api_key = api_key or os.getenv("EMBEDDING_MODEL_API_KEY")
                     
                     if not api_key:
+                        self.logger.error("No API key found for embedding provider")
                         raise StorageError(
                             "Embedding API key missing. Cannot auto-detect dimension. "
                             "Set settings.embedding or EMBEDDING_MODEL_API_KEY."
                         )
                     
                     # Create provider and detect dimension
+                    self.logger.info("Creating embedding provider for dimension detection...")
                     embedding_provider = EmbeddingFactory.get_provider(api_key=api_key)
+                    
+                    detected_dimension = None
                     try:
+                        self.logger.info("Calling detect_dimension()...")
                         detected_dimension = await embedding_provider.detect_dimension()
-                        self.logger.info(f"Auto-detected embedding dimension: {detected_dimension}")
+                        self.logger.info(f"✓ Auto-detected embedding dimension: {detected_dimension}")
                         
                         # Update config with detected dimension
+                        self.logger.info(f"Updating vector_size from {self.config.vector_size} to {detected_dimension}")
                         self.config.vector_size = detected_dimension
+                        self.logger.info(f"Config vector_size after update: {self.config.vector_size}")
+                    except Exception as detect_error:
+                        self.logger.error(f"Failed to detect dimension: {detect_error}", exc_info=True)
+                        raise StorageError(f"Dimension detection failed: {detect_error}")
                     finally:
                         await embedding_provider.close()
                     
                     # Create collection with detected dimension
+                    self.logger.info(f"Creating collection with dimension={self.config.vector_size}")
                     await self._client.create_collection(
                         collection_name=self.collection_name,
                         vectors_config=qdrant_models.VectorParams(
@@ -258,6 +271,7 @@ class QdrantStore(LoggerMixin):
                             ),
                         ),
                     )
+                    self.logger.info(f"✓ Collection created successfully with dimension {self.config.vector_size}")
 
                     # Create payload indexes for efficient filtering
                     await self._create_payload_indexes()
@@ -297,26 +311,28 @@ class QdrantStore(LoggerMixin):
                 self.logger.warning(f"Failed to create index for {field_name}: {e}")
 
     async def _validate_collection(self) -> None:
-        """Validate existing collection configuration."""
+        """Validate that collection exists and is properly configured.
+        
+        Auto-detects the collection's dimension and updates config to match.
+        """
         try:
             collection_info = await self._client.get_collection(self.collection_name)
-            existing_size = collection_info.config.params.vectors.size
             
-            if existing_size != self.config.vector_size:
-                raise VectorDimensionError(
-                    f"Collection dimension mismatch: expected {self.config.vector_size}, "
-                    f"found {existing_size}"
+            # Get actual dimension from collection
+            actual_dimension = collection_info.config.params.vectors.size
+            
+            # If dimension doesn't match config, update config to match collection
+            if self.config.vector_size != actual_dimension:
+                self.logger.warning(
+                    f"Collection dimension ({actual_dimension}) differs from config ({self.config.vector_size}). "
+                    f"Updating config to match collection."
                 )
-                
-        except VectorDimensionError:
-            # Re-raise VectorDimensionError as-is
-            raise
+                self.config.vector_size = actual_dimension
+            
+            self.logger.info(f"Validated collection {self.collection_name} with dimension {actual_dimension}")
+            
         except Exception as e:
-            if "not found" in str(e).lower():
-                # Collection was deleted, recreate
-                await self.setup_collection()
-            else:
-                raise StorageError(f"Collection validation failed: {e}")
+            raise StorageError(f"Validation failed: {e}")
 
     async def store_repositories_batch(
         self,
@@ -827,19 +843,14 @@ class QdrantStore(LoggerMixin):
                     repo["has_embedding"] = True
                     continue
                     
-                # Check if repository has valid summary and tags
+                # Check if repository has valid summary
                 has_summary = (
                     repo.get("summary")
                     and isinstance(repo.get("summary"), str)
                     and len(repo.get("summary", "")) > 10
                 )
-                has_tags = (
-                    repo.get("tags")
-                    and isinstance(repo.get("tags"), list)
-                    and len(repo.get("tags", [])) > 0
-                )
                 
-                if not has_summary or not has_tags:
+                if not has_summary:
                     repo["has_embedding"] = False
                     continue
                 
@@ -866,12 +877,15 @@ class QdrantStore(LoggerMixin):
                     for repo_dict in repos_to_embed:
                         from src.core.models import RepositoryData
                         
+                        # Clean and limit tags to 20
+                        tags = [t.strip() for t in repo_dict.get("tags", []) if t and t.strip()][:20]
+                        
                         repo_obj = RepositoryData(
                             repo_name=repo_dict.get("repo_name", ""),
                             repo_url=repo_dict.get("repo_url", ""),
                             summary=repo_dict.get("summary", ""),
                             description=repo_dict.get("description", ""),
-                            tags=repo_dict.get("tags", []),
+                            tags=tags,
                             language=repo_dict.get("language", ""),
                             stars=repo_dict.get("stars", 0),
                             forks=repo_dict.get("forks", 0),

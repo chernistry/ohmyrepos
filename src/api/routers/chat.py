@@ -1,4 +1,5 @@
 import logging
+import json
 from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -66,18 +67,27 @@ async def chat(request: ChatRequest):
     
     async def event_generator():
         try:
+            logger.info("Starting chat stream generation")
             stream = await generator.generate(
                 prompt=last_message,
                 context=context,
                 history=history,
                 stream=True
             )
+            chunk_count = 0
             async for chunk in stream:
-                yield chunk
+                chunk_count += 1
+                if chunk:
+                    # Send as JSON SSE payload to mirror frontend expectations
+                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+            
+            logger.info(f"Stream completed, sent {chunk_count} chunks")
+            # Send completion marker
+            yield "data: [DONE]\n\n"
         except Exception as e:
             logger.error(f"Error generating chat response: {e}", exc_info=True)
-            yield f"Error: {str(e)}"
+            yield f"data: {json.dumps({'error': {'message': str(e)}})}\n\n"
         finally:
             await generator.close()
 
-    return StreamingResponse(event_generator(), media_type="text/plain")
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
