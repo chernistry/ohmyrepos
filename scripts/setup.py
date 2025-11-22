@@ -240,6 +240,7 @@ def run_ingestion() -> None:
 
 
 if __name__ == "__main__":
+    header("Oh My Repos - Setup")
     env = read_env(ENV_PATH)
     info(f"Using repository root: {ROOT}")
     configure_embeddings(env)
@@ -247,7 +248,7 @@ if __name__ == "__main__":
     write_env(env)
     run_ingestion()
 
-    print("\nNext steps:")
-    print("1) Start dev stack: ./run.sh dev")
-    print("2) Or start only backend/frontend: ./run.sh b start | ./run.sh f start")
-    print("3) To expose MCP tools (Claude/Cursor): python mcp_server.py")
+    header("Next Steps")
+    print(f"{BOLD}1){RESET} Start dev stack: {GREEN}./run.sh dev{RESET}")
+    print(f"{BOLD}2){RESET} Or start only backend/frontend: {GREEN}./run.sh b start{RESET} | {GREEN}./run.sh f start{RESET}")
+    print(f"{BOLD}3){RESET} To expose MCP tools (Claude/Cursor): {GREEN}python mcp_server.py{RESET}")
