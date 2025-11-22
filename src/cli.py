@@ -423,16 +423,21 @@ async def _summarize_repos(
 
                     if has_summary and has_tags:
                         if "error" in repo:
+                            from rich.markup import escape
                             console.print(
-                                f"[bold yellow]⚠[/bold yellow] [bold]{repo.get('name', 'unknown')}[/bold]: {repo.get('error')}"
+                                f"[bold yellow]⚠[/bold yellow] {escape(repo.get('name', 'unknown'))}: {escape(repo.get('error'))}"
                             )
                         else:
                             processed_count += 1
+                            from rich.markup import escape
+                            repo_name = repo.get('name', 'unknown')
+                            summary = escape(repo.get('summary', '')[:100])
+                            tags = escape(', '.join(repo.get('tags', [])))
                             console.print(
-                                f"[bold green]✓[/bold green] [bold]{repo.get('name', 'unknown')}[/bold]: {repo.get('summary', '')[:100]}..."
+                                f"[bold green]✓[/bold green] {escape(repo_name)}: {summary}..."
                             )
                             console.print(
-                                f"   [bold]Tags:[/bold] {', '.join(repo.get('tags', []))}\n"
+                                f"   Tags: {tags}\n"
                             )
                     else:
                         skipped_count += 1
@@ -473,11 +478,14 @@ async def _summarize_repos(
                     processed_count += 1
 
                     # Show summary in console
+                    from rich.markup import escape
+                    summary_text = escape(summary.get('summary', '')[:100])
+                    tags_text = escape(', '.join(summary.get('tags', [])))
                     console.print(
-                        f"[bold green]✓[/bold green] [bold]{repo_name}[/bold]: {summary.get('summary', '')[:100]}..."
+                        f"[bold green]✓[/bold green] {escape(repo_name)}: {summary_text}..."
                     )
                     console.print(
-                        f"   [bold]Tags:[/bold] {', '.join(summary.get('tags', []))}\n"
+                        f"   Tags: {tags_text}\n"
                     )
 
                     # Save incrementally if requested
@@ -615,16 +623,20 @@ async def _process_repos(
                     if has_summary and has_tags:
                         repo_name = repo.get("name", "unknown")
                         if "error" in repo:
+                            from rich.markup import escape
                             console.print(
-                                f"[bold yellow]⚠[/bold yellow] [bold]{repo_name}[/bold]: {repo.get('error')}"
+                                f"[bold yellow]⚠[/bold yellow] {escape(repo_name)}: {escape(repo.get('error'))}"
                             )
                         else:
                             processed_count += 1
+                            from rich.markup import escape
+                            summary = escape(repo.get('summary', '')[:100])
+                            tags = escape(', '.join(repo.get('tags', [])))
                             console.print(
-                                f"[bold green]✓[/bold green] [bold]{repo_name}[/bold]: {repo.get('summary', '')[:100]}..."
+                                f"[bold green]✓[/bold green] {escape(repo_name)}: {summary}..."
                             )
                             console.print(
-                                f"   [bold]Tags:[/bold] {', '.join(repo.get('tags', []))}\n"
+                                f"   Tags: {tags}\n"
                             )
                     else:
                         skipped_count += 1
@@ -684,11 +696,14 @@ async def _process_repos(
                     processed_count += 1
 
                     # Show summary in console
+                    from rich.markup import escape
+                    summary_text = escape(summary.get('summary', '')[:100])
+                    tags_text = escape(', '.join(summary.get('tags', [])))
                     console.print(
-                        f"[bold green]✓[/bold green] [bold]{repo_name}[/bold]: {summary.get('summary', '')[:100]}..."
+                        f"[bold green]✓[/bold green] {escape(repo_name)}: {summary_text}..."
                     )
                     console.print(
-                        f"   [bold]Tags:[/bold] {', '.join(summary.get('tags', []))}\n"
+                        f"   Tags: {tags_text}\n"
                     )
 
                     # Save incrementally if requested

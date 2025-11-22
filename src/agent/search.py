@@ -211,12 +211,9 @@ async def expand_domain_terms(intent: str) -> List[str]:
     if not settings.llm:
         return []
 
-    prompt = f"""
-    Task: List 5-10 specific technical terms, libraries, or frameworks related to the user's intent.
-    Intent: "{intent}"
-    
-    Output JSON: {{ "terms": ["term1", "term2"] }}
-    """
+    from pathlib import Path
+    prompt_template = Path("prompts/domain_terms_expansion.md").read_text(encoding="utf-8")
+    prompt = prompt_template.replace("{{intent}}", intent)
     
     headers = {}
     if settings.llm.api_key:
@@ -250,26 +247,11 @@ async def evolve_intent(original_intent: str, previous_intents: List[str], found
     if not settings.llm:
         return original_intent
 
-    prompt = f"""
-    Task: Generate a NEW, DISTINCT search intent to discover more GitHub repositories related to the user's original goal.
-    
-    Original Goal: "{original_intent}"
-    
-    We have already searched for:
-    {json.dumps(previous_intents, indent=2)}
-    
-    We have already found these repositories (DO NOT search for them again):
-    {json.dumps(found_repos[:20], indent=2)}  # Top 20 found
-    
-    Goal: Find *different* or *niche* or *related* repositories that we might have missed. 
-    Think about:
-    - Alternative frameworks or libraries
-    - Specific use cases (e.g., "for finance", "for healthcare")
-    - Underlying technologies (e.g., "vector database", "knowledge graph")
-    - Competitors or alternatives to found repos
-    
-    Output JSON: {{ "new_intent": "your new search query string" }}
-    """
+    from pathlib import Path
+    prompt_template = Path("prompts/intent_evolution.md").read_text(encoding="utf-8")
+    prompt = prompt_template.replace("{{original_intent}}", original_intent) \
+        .replace("{{previous_intents}}", json.dumps(previous_intents, indent=2)) \
+        .replace("{{found_repos}}", json.dumps(found_repos[:20], indent=2))
     
     headers = {}
     if settings.llm.api_key:

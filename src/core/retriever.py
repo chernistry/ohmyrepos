@@ -4,6 +4,7 @@ This module provides hybrid search functionality combining dense (vector) and sp
 """
 
 import logging
+import asyncio
 from typing import Dict, List, Optional, Any
 import json
 from pathlib import Path
@@ -98,16 +99,17 @@ class HybridRetriever:
                 )
                 self.qdrant_store = None
 
-        # Load repository data for BM25 indexing
-        await self._load_repo_data()
+        # Load repository data for BM25 indexing (in thread pool)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._load_repo_data_sync)
 
-        # Create BM25 index
-        self._create_bm25_index()
+        # Create BM25 index (in thread pool)
+        await loop.run_in_executor(None, self._create_bm25_index_sync)
 
         logger.info("HybridRetriever initialized")
 
-    async def _load_repo_data(self) -> None:
-        """Load repository data from repos.json."""
+    def _load_repo_data_sync(self) -> None:
+        """Load repository data from repos.json (synchronous)."""
         if not self.repos_json_path.exists():
             # Fallback to project root `repos.json`
             fallback = Path(__file__).resolve().parents[1] / "repos.json"
@@ -159,8 +161,8 @@ class HybridRetriever:
             self.repo_data = []
             self.repo_corpus = []
 
-    def _create_bm25_index(self) -> None:
-        """Create BM25 index from repository corpus."""
+    def _create_bm25_index_sync(self) -> None:
+        """Create BM25 index from repository corpus (synchronous)."""
         if not self.repo_corpus:
             logger.warning("Empty repository corpus, BM25 index not created")
             return

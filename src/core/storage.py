@@ -120,20 +120,7 @@ class QdrantStore(LoggerMixin):
             if self.config.api_key:
                 client_kwargs["api_key"] = self.config.api_key.get_secret_value()
             
-            # Use sync client first to verify connection
-            try:
-                from qdrant_client import QdrantClient
-                sync_kwargs = {"url": str(self.config.url)}
-                if self.config.api_key:
-                    sync_kwargs["api_key"] = self.config.api_key.get_secret_value()
-                sync_client = QdrantClient(**sync_kwargs)
-                sync_client.get_collections()
-                self.logger.debug("Successfully connected to Qdrant using sync client")
-            except Exception as sync_error:
-                self.logger.error(f"Failed to connect using sync client: {sync_error}")
-                raise ConnectionError(f"Failed to connect to Qdrant: {sync_error}")
-            
-            # Now initialize async client
+            # Initialize async client
             try:
                 self._client = AsyncQdrantClient(**client_kwargs)
                 self.logger.debug(f"Initialized Qdrant client with URL: {self.config.url}")

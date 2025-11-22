@@ -266,7 +266,7 @@ async def main() -> None:
 
     async with stdio_server() as (read, write):
         try:
-            await server.run(read, write)
+            await server.run(read, write, server.create_initialization_options())
         finally:
             if _retriever:
                 await _retriever.close()

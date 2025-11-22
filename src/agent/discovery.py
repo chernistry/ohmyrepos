@@ -143,6 +143,8 @@ async def _discover_async(
         console.print(f"\n[bold magenta]Running in Autonomous Mode (Limit: {limit})[/bold magenta]")
         
         while starred_count < limit:
+            console.print(f"[dim]Debug: Loop start. Starred: {starred_count}/{limit}. Intents: {len(previous_intents)}[/dim]")
+            
             # If this is not the first iteration, we need to search again with evolved intent
             if len(previous_intents) > 1:
                 console.print(f"\n[bold blue]Evolving Search...[/bold blue]")
@@ -159,51 +161,52 @@ async def _discover_async(
                 
                 if not candidates:
                     console.print("[yellow]No new candidates found with this intent. Trying to evolve again...[/yellow]")
-                    # Force evolution even if no candidates found
+                    high_quality_results = [] # Clear stale results
                 else:
                     console.print(f"\n[bold]Scoring {len(candidates)} new candidates...[/bold]")
                     scored_results = await score_candidates(candidates, selected_cluster)
                     high_quality_results = [r for r in scored_results if r.score >= 7.0]
             
-            # Adaptive Thresholding Loop for current batch
-            thresholds = [8.5, 7.5, 7.0]
-            batch_starred = 0
-            
-            for threshold in thresholds:
-                if starred_count >= limit:
-                    break
+            if not high_quality_results:
+                console.print("[dim]Debug: No high quality results to process. Skipping to evolution.[/dim]")
+            else:
+                # Adaptive Thresholding Loop for current batch
+                thresholds = [8.5, 7.5, 7.0]
+                batch_starred = 0
                 
-                # If we already starred something in this batch (at higher threshold), 
-                # we might not need to lower threshold if we are happy with quality.
-                # But to maximize recall, we can continue.
-                # Let's stick to: if we found 0 at 8.5, try 7.5.
-                if batch_starred > 0:
-                    break
-                    
-                console.print(f"[cyan]Checking candidates with score >= {threshold}...[/cyan]")
-                
-                for item in high_quality_results:
+                for threshold in thresholds:
                     if starred_count >= limit:
                         break
                     
-                    if item.repo.full_name in starred_repos:
-                        continue
+                    if batch_starred > 0:
+                        break
                         
-                    if item.score >= threshold:
-                        console.print(f"Auto-starring [bold]{item.repo.full_name}[/bold] (Score: {item.score:.1f})...")
-                        if await action_manager.star_repo(item.repo.full_name):
-                            console.print(f"[green]Successfully starred {item.repo.full_name}![/green]")
-                            starred_count += 1
-                            batch_starred += 1
-                            starred_repos.add(item.repo.full_name)
-                            excluded.add(item.repo.full_name) # Add to excluded immediately
-                        else:
-                            console.print(f"[red]Failed to star {item.repo.full_name}.[/red]")
+                    console.print(f"[cyan]Checking candidates with score >= {threshold}...[/cyan]")
+                    
+                    for item in high_quality_results:
+                        if starred_count >= limit:
+                            break
+                        
+                        if item.repo.full_name in starred_repos:
+                            continue
+                            
+                        if item.score >= threshold:
+                            console.print(f"Auto-starring [bold]{item.repo.full_name}[/bold] (Score: {item.score:.1f})...")
+                            if await action_manager.star_repo(item.repo.full_name):
+                                console.print(f"[green]Successfully starred {item.repo.full_name}![/green]")
+                                starred_count += 1
+                                batch_starred += 1
+                                starred_repos.add(item.repo.full_name)
+                                excluded.add(item.repo.full_name)
+                            else:
+                                console.print(f"[red]Failed to star {item.repo.full_name}.[/red]")
             
             if starred_count >= limit:
+                console.print("[dim]Debug: Limit reached. Breaking loop.[/dim]")
                 break
                 
             # Evolve Intent for next iteration
+            console.print("[dim]Debug: Evolving intent...[/dim]")
             from src.agent.search import evolve_intent
             console.print("[dim]Thinking about next search step...[/dim]")
             
@@ -211,6 +214,7 @@ async def _discover_async(
             found_names = [r.repo.full_name for r in high_quality_results]
             
             new_intent = await evolve_intent(intent, previous_intents, found_names)
+            console.print(f"[dim]Debug: New intent generated: {new_intent}[/dim]")
             
             if new_intent == current_intent or new_intent in previous_intents:
                 console.print("[yellow]Could not generate distinct new intent. Stopping.[/yellow]")
