@@ -67,9 +67,19 @@ def agent_discover(
         "--skip-profile",
         help="Skip profile analysis and go straight to search",
     ),
+    auto: bool = typer.Option(
+        False,
+        "--auto",
+        help="Enable autonomous mode (automatically star high-quality repos)",
+    ),
+    limit: int = typer.Option(
+        10,
+        "--limit",
+        help="Maximum number of repositories to star in autonomous mode",
+    ),
 ):
     """Discover new repositories based on your interests."""
-    run_discovery(repo_file, max_results, category, skip_profile)
+    run_discovery(repo_file, max_results, category, skip_profile, auto, limit)
 
 
 @app.command()

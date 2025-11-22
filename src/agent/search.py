@@ -169,6 +169,45 @@ async def generate_search_queries(intent: str, strategy: str = "specific") -> Li
             logger.error(f"Failed to generate search queries: {e}")
             return [intent]
 
+async def expand_domain_terms(intent: str) -> List[str]:
+    """Ask LLM for technical terms and libraries related to the intent."""
+    if not settings.llm:
+        return []
+
+    prompt = f"""
+    Task: List 5-10 specific technical terms, libraries, or frameworks related to the user's intent.
+    Intent: "{intent}"
+    
+    Output JSON: {{ "terms": ["term1", "term2"] }}
+    """
+    
+    headers = {}
+    if settings.llm.api_key:
+        headers["Authorization"] = f"Bearer {settings.llm.api_key.get_secret_value()}"
+    
+    payload = {
+        "model": settings.llm.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "response_format": {"type": "json_object"}
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{settings.llm.base_url}/chat/completions",
+                json=payload,
+                headers=headers,
+                timeout=5.0
+            )
+            response.raise_for_status()
+            data = response.json()
+            content = json.loads(data["choices"][0]["message"]["content"])
+            return content.get("terms", [])
+        except Exception as e:
+            logger.warning(f"Failed to expand domain terms: {e}")
+            return []
+
 async def smart_search(
     intent: str,
     min_stars: int = 100,
@@ -192,9 +231,18 @@ async def smart_search(
     all_results = []
     seen_full_names = set(excluded_repos)
     
+    # 0. Cognitive Improvement: Expand domain terms
+    domain_terms = await expand_domain_terms(intent)
+    if domain_terms:
+        logger.info(f"Expanded domain terms: {domain_terms}")
+        # Enrich intent with top 3 terms for better context
+        enriched_intent = f"{intent} (keywords: {', '.join(domain_terms[:3])})"
+    else:
+        enriched_intent = intent
+
     # Strategy 1: Specific queries with strict constraints
-    logger.info(f"Deep Search [1/3]: Specific queries for '{intent}'")
-    queries = await generate_search_queries(intent, strategy="specific")
+    logger.info(f"Deep Search [1/3]: Specific queries for '{enriched_intent}'")
+    queries = await generate_search_queries(enriched_intent, strategy="specific")
     
     # Initial search with strict constraints
     results = await _execute_search_batch(queries, min_stars, max_results, seen_full_names, strict_time=True)
@@ -204,7 +252,7 @@ async def smart_search(
         return all_results[:max_results]
         
     # Strategy 2: Relax time constraint and star count
-    logger.info(f"Deep Search [2/3]: Relaxing constraints (time & stars) for '{intent}'")
+    logger.info(f"Deep Search [2/3]: Relaxing constraints (time & stars) for '{enriched_intent}'")
     # Use same queries but relax constraints in execution
     results = await _execute_search_batch(queries, min_stars // 2, max_results, seen_full_names, strict_time=False)
     all_results.extend(results)
@@ -213,8 +261,8 @@ async def smart_search(
         return all_results[:max_results]
 
     # Strategy 3: Broad queries
-    logger.info(f"Deep Search [3/3]: Generating broad queries for '{intent}'")
-    broad_queries = await generate_search_queries(intent, strategy="broad")
+    logger.info(f"Deep Search [3/3]: Generating broad queries for '{enriched_intent}'")
+    broad_queries = await generate_search_queries(enriched_intent, strategy="broad")
     results = await _execute_search_batch(broad_queries, min_stars // 4, max_results, seen_full_names, strict_time=False)
     all_results.extend(results)
 

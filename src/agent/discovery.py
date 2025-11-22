@@ -20,7 +20,9 @@ def discover(
     repos_path: Path,
     max_results: int = 20,
     category: Optional[str] = None,
-    skip_profile: bool = False
+    skip_profile: bool = False,
+    auto_mode: bool = False,
+    limit: int = 10
 ):
     """Run the discovery pipeline.
 
@@ -29,14 +31,18 @@ def discover(
         max_results: Maximum number of repositories to recommend.
         category: Optional specific category to focus on.
         skip_profile: If True, skip profile analysis and go straight to search.
+        auto_mode: If True, automatically star high-quality repositories.
+        limit: Maximum number of repositories to star in auto mode.
     """
-    asyncio.run(_discover_async(repos_path, max_results, category, skip_profile))
+    asyncio.run(_discover_async(repos_path, max_results, category, skip_profile, auto_mode, limit))
 
 async def _discover_async(
     repos_path: Path,
     max_results: int = 20,
     category: Optional[str] = None,
-    skip_profile: bool = False
+    skip_profile: bool = False,
+    auto_mode: bool = False,
+    limit: int = 10
 ):
     console.print("[bold blue]GitHub Discovery Agent[/bold blue]")
     
@@ -127,65 +133,87 @@ async def _discover_async(
     from src.agent.actions import ActionManager
     action_manager = ActionManager()
 
-    while True:
-        console.print(f"\n[bold green]Found {len(high_quality_results)} top recommendations:[/bold green]")
-        table = Table(show_header=True, header_style="bold cyan")
-        table.add_column("#", style="dim")
-        table.add_column("Name")
-        table.add_column("Score")
-        table.add_column("Reasoning")
-        table.add_column("URL")
+    if auto_mode:
+        console.print(f"\n[bold magenta]Running in Autonomous Mode (Limit: {limit})[/bold magenta]")
+        starred_count = 0
         
-        for idx, item in enumerate(high_quality_results, 1):
-            table.add_row(
-                str(idx),
-                item.repo.full_name,
-                f"{item.score:.1f}",
-                item.reasoning,
-                f"[link={item.repo.url}]Link[/link]"
-            )
-        
-        console.print(table)
-        
-        console.print("\n[bold]Actions:[/bold]")
-        console.print("[bold green]S[/bold green] <number>: Star repository (e.g., 'S 1')")
-        console.print("[bold blue]I[/bold blue] <number>: Ingest repository (e.g., 'I 1')")
-        console.print("[bold yellow]C[/bold yellow]: Continue / Exit")
-        
-        choice = Prompt.ask("Enter action").strip().upper()
-        
-        if choice == "C":
-            break
-            
-        try:
-            action, idx_str = choice.split(maxsplit=1)
-            idx = int(idx_str) - 1
-            
-            if 0 <= idx < len(high_quality_results):
-                repo = high_quality_results[idx].repo
+        for item in high_quality_results:
+            if starred_count >= limit:
+                console.print(f"[yellow]Reached limit of {limit} stars. Stopping.[/yellow]")
+                break
                 
-                if action == "S":
-                    console.print(f"Starring {repo.full_name}...")
-                    if await action_manager.star_repo(repo.full_name):
-                        console.print(f"[green]Successfully starred {repo.full_name}![/green]")
-                    else:
-                        console.print(f"[red]Failed to star {repo.full_name}. Check logs.[/red]")
-                        
-                elif action == "I":
-                    console.print(f"Ingesting {repo.full_name}...")
-                    if await action_manager.ingest_repo(repo.url):
-                        console.print(f"[green]Successfully ingested {repo.full_name}![/green]")
-                    else:
-                        console.print(f"[red]Failed to ingest {repo.full_name}. Check logs.[/red]")
+            if item.score >= 8.5:
+                console.print(f"Auto-starring [bold]{item.repo.full_name}[/bold] (Score: {item.score:.1f})...")
+                if await action_manager.star_repo(item.repo.full_name):
+                    console.print(f"[green]Successfully starred {item.repo.full_name}![/green]")
+                    starred_count += 1
                 else:
-                    console.print("[red]Invalid action code.[/red]")
+                    console.print(f"[red]Failed to star {item.repo.full_name}.[/red]")
             else:
-                console.print("[red]Invalid repository number.[/red]")
+                console.print(f"[dim]Skipping {item.repo.full_name} (Score: {item.score:.1f} < 8.5)[/dim]")
                 
-        except ValueError:
-            console.print("[red]Invalid format. Use 'S 1' or 'I 1'.[/red]")
-        except Exception as e:
-            console.print(f"[red]Error: {e}[/red]")
+        console.print(f"\n[bold]Autonomous session complete. Starred {starred_count} repositories.[/bold]")
+        
+    else:
+        while True:
+            console.print(f"\n[bold green]Found {len(high_quality_results)} top recommendations:[/bold green]")
+            table = Table(show_header=True, header_style="bold cyan")
+            table.add_column("#", style="dim")
+            table.add_column("Name")
+            table.add_column("Score")
+            table.add_column("Reasoning")
+            table.add_column("URL")
+            
+            for idx, item in enumerate(high_quality_results, 1):
+                table.add_row(
+                    str(idx),
+                    item.repo.full_name,
+                    f"{item.score:.1f}",
+                    item.reasoning,
+                    f"[link={item.repo.url}]Link[/link]"
+                )
+            
+            console.print(table)
+            
+            console.print("\n[bold]Actions:[/bold]")
+            console.print("[bold green]S[/bold green] <number>: Star repository (e.g., 'S 1')")
+            console.print("[bold blue]I[/bold blue] <number>: Ingest repository (e.g., 'I 1')")
+            console.print("[bold yellow]C[/bold yellow]: Continue / Exit")
+            
+            choice = Prompt.ask("Enter action").strip().upper()
+            
+            if choice == "C":
+                break
+                
+            try:
+                action, idx_str = choice.split(maxsplit=1)
+                idx = int(idx_str) - 1
+                
+                if 0 <= idx < len(high_quality_results):
+                    repo = high_quality_results[idx].repo
+                    
+                    if action == "S":
+                        console.print(f"Starring {repo.full_name}...")
+                        if await action_manager.star_repo(repo.full_name):
+                            console.print(f"[green]Successfully starred {repo.full_name}![/green]")
+                        else:
+                            console.print(f"[red]Failed to star {repo.full_name}. Check logs.[/red]")
+                            
+                    elif action == "I":
+                        console.print(f"Ingesting {repo.full_name}...")
+                        if await action_manager.ingest_repo(repo.url):
+                            console.print(f"[green]Successfully ingested {repo.full_name}![/green]")
+                        else:
+                            console.print(f"[red]Failed to ingest {repo.full_name}. Check logs.[/red]")
+                    else:
+                        console.print("[red]Invalid action code.[/red]")
+                else:
+                    console.print("[red]Invalid repository number.[/red]")
+                    
+            except ValueError:
+                console.print("[red]Invalid format. Use 'S 1' or 'I 1'.[/red]")
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
 
 def _print_clusters(clusters: List[InterestCluster]):
     table = Table(show_header=True, header_style="bold magenta")

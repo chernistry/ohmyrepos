@@ -14,7 +14,12 @@ Provide a concise reasoning for your score and a one-sentence summary of what th
 </task>
 
 <scoring_criteria>
-1.  **Relevance (40%)**: How well does it match the user's interest and keywords?
+1. **Relevance (0-10)**:
+    - How well does the repository match the user's specific intent and interest cluster?
+    - **CRITICAL**: If the user asks for a specific domain (e.g., "marketing", "arbitrage", "biology"), penalize generic tools (e.g., "general AI agent framework") unless they explicitly mention features or plugins for that domain.
+    - 10: Perfect match for specific domain/problem.
+    - 7-9: Strong match, or generic tool with clear domain applicability.
+    - <5: Generic tool with no clear connection to the specific domain.
 2.  **Quality & Maturity (30%)**: Does it have a good README? Is it a serious project (stars are a proxy, but look at content)?
 3.  **Freshness & Activity (30%)**: Is it actively maintained? (Note: You only see the README and metadata, infer activity from context if possible, otherwise rely on general quality).
 </scoring_criteria>
