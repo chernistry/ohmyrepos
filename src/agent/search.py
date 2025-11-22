@@ -5,6 +5,7 @@ This module handles searching GitHub for repositories and deduplicating results.
 
 import asyncio
 import logging
+import json
 from typing import List, Dict, Any, Optional, Set
 from datetime import datetime, timedelta
 
@@ -130,26 +131,9 @@ async def generate_search_queries(intent: str) -> List[str]:
         logger.warning("LLM not configured, falling back to simple query.")
         return [intent]
 
-    prompt = f"""
-    You are an expert at searching GitHub. Convert the following user intent into 3-5 distinct, optimized GitHub search queries to find relevant repositories.
-    
-    User Intent: "{intent}"
-    
-    Rules:
-    1. Use specific GitHub search qualifiers like `topic:`, `language:`, `description:`.
-    2. Vary the keywords to cover different aspects (e.g., synonyms, related technologies).
-    3. Do NOT include `stars:>=` or `pushed:>` qualifiers as these are handled programmatically.
-    4. Return ONLY a JSON object with a list of strings.
-
-    Example Output:
-    {{
-        "queries": [
-            "topic:rag language:python",
-            "retrieval augmented generation description:framework",
-            "topic:llm-agent topic:orchestration"
-        ]
-    }}
-    """
+    from pathlib import Path
+    prompt_template = Path("prompts/search_query_generation.md").read_text(encoding="utf-8")
+    prompt = prompt_template.replace("{{intent}}", intent)
 
     headers = {}
     if settings.llm.api_key:

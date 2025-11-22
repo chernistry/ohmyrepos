@@ -51,31 +51,8 @@ def analyze_profile(repos_path: Path) -> List[InterestCluster]:
         
         repos_text = "\n".join(sample_repos)
 
-        prompt = f"""
-        You are an expert developer profile analyzer. Analyze the following list of GitHub repositories starred by a user to identify their core technical interests.
-        
-        Starred Repositories (Sample):
-        {repos_text}
-        
-        Identify 3-5 distinct "Interest Clusters" that represent this user's preferences.
-        For each cluster, provide:
-        1. A descriptive Name (e.g., "Generative AI Agents", "Rust CLI Tools").
-        2. A list of 3-5 specific Search Keywords that would find *new* similar projects on GitHub.
-        3. A list of primary Languages.
-        4. A relevance Score (0.0 to 1.0) based on how prominent this interest appears to be.
-
-        Return ONLY a JSON object with the following structure:
-        {{
-            "clusters": [
-                {{
-                    "name": "Cluster Name",
-                    "keywords": ["keyword1", "keyword2"],
-                    "languages": ["Python"],
-                    "score": 0.9
-                }}
-            ]
-        }}
-        """
+        prompt_template = Path("prompts/profile_analysis.md").read_text(encoding="utf-8")
+        prompt = prompt_template.replace("{{repos_text}}", repos_text)
 
         if not settings.llm:
             logger.warning("LLM not configured, falling back to empty clusters.")

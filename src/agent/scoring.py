@@ -58,28 +58,15 @@ async def score_candidates(
     for repo in candidates:
         readme = await fetch_readme(repo.full_name)
         
-        prompt = f"""
-        You are an expert code reviewer. Evaluate the following GitHub repository for a developer interested in: {profile.name} (Keywords: {', '.join(profile.keywords)}).
-        
-        Repository: {repo.full_name}
-        Description: {repo.description}
-        Language: {repo.language}
-        Stars: {repo.stars}
-        README Excerpt:
-        {readme[:1000]}...
-        
-        Score the repository from 0.0 to 10.0 based on:
-        1. Relevance to the user's interests.
-        2. Quality and maturity (stars, documentation).
-        3. Freshness and activity.
-        
-        Return ONLY a JSON object with the following format:
-        {{
-            "score": <float>,
-            "reasoning": "<concise explanation>",
-            "summary": "<one sentence summary>"
-        }}
-        """
+        from pathlib import Path
+        prompt_template = Path("prompts/repo_scoring.md").read_text(encoding="utf-8")
+        prompt = prompt_template.replace("{{profile_name}}", profile.name) \
+            .replace("{{profile_keywords}}", ', '.join(profile.keywords)) \
+            .replace("{{repo_full_name}}", repo.full_name) \
+            .replace("{{repo_description}}", str(repo.description)) \
+            .replace("{{repo_language}}", str(repo.language)) \
+            .replace("{{repo_stars}}", str(repo.stars)) \
+            .replace("{{readme_content}}", readme[:5000])
         
         try:
             # Use the configured LLM
