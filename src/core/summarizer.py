@@ -159,16 +159,25 @@ class RepoSummarizer:
             # Update the original repo with the summary
             updated_repo = repo_data.copy()
             updated_repo.update(result)
+            canonical_name = (
+                updated_repo.get("repo_name")
+                or updated_repo.get("full_name")
+                or updated_repo.get("name")
+                or updated_repo.get("repo_url")
+                or "unknown"
+            )
+            updated_repo.setdefault("repo_name", canonical_name)
+            updated_repo.setdefault("name", canonical_name)
 
             # Save the result immediately if callback is provided
             if self.save_callback:
                 async with self.lock:
                     # Check if this repo is already in our list (by name)
-                    repo_name = updated_repo.get("name", "unknown")
+                    repo_name = canonical_name
                     existing_index = None
 
                     for i, repo in enumerate(self.enriched_repos):
-                        if repo.get("name") == repo_name:
+                        if (repo.get("name") or repo.get("repo_name")) == repo_name:
                             existing_index = i
                             break
 
@@ -183,13 +192,17 @@ class RepoSummarizer:
             return repo_data, result
 
     async def summarize_batch(
-        self, repos: List[Dict[str, Any]], output_file: Optional[Path] = None
+        self,
+        repos: List[Dict[str, Any]],
+        output_file: Optional[Path] = None,
+        force_reprocess: bool = False,
     ) -> List[Dict[str, Any]]:
         """Summarize multiple repositories in parallel.
 
         Args:
             repos: List of repository data
             output_file: Optional path to save results incrementally
+            force_reprocess: If True, summarize all repos even if summaries already exist
 
         Returns:
             List of repositories with summaries
@@ -202,7 +215,17 @@ class RepoSummarizer:
         self.enriched_repos = []
 
         # Create a dictionary to track repositories by name to avoid duplicates
-        repo_dict = {}
+        repo_dict: Dict[str, Dict[str, Any]] = {}
+
+        def repo_key(repo: Dict[str, Any]) -> str:
+            """Canonical repo identifier across schema variants."""
+            return (
+                repo.get("repo_name")
+                or repo.get("full_name")
+                or repo.get("name")
+                or repo.get("html_url")
+                or ""
+            ).strip().lower()
 
         # Setup save callback if output file is provided
         if output_file:
@@ -217,7 +240,7 @@ class RepoSummarizer:
             self.save_callback = save_to_file
 
             # If output file exists, load existing data to avoid duplicates
-            if output_file.exists():
+            if output_file.exists() and not force_reprocess:
                 try:
                     existing_data = json.loads(output_file.read_text(encoding="utf-8"))
                     if isinstance(existing_data, list):
@@ -226,8 +249,11 @@ class RepoSummarizer:
                         )
                         # Create dictionary of existing repos by name
                         for repo in existing_data:
-                            name = repo.get("name")
+                            name = repo_key(repo)
                             if name:
+                                # Normalize fields for downstream steps
+                                repo.setdefault("repo_name", repo.get("repo_name") or repo.get("full_name") or repo.get("name"))
+                                repo.setdefault("name", repo.get("name") or repo.get("repo_name"))
                                 repo_dict[name] = repo
                         logger.info(
                             f"Found {len(repo_dict)} unique repositories in existing data"
@@ -242,10 +268,22 @@ class RepoSummarizer:
         already_processed = []
 
         for repo in repos:
-            repo_name = repo.get("name", "unknown")
+            raw_name = (
+                repo.get("repo_name")
+                or repo.get("full_name")
+                or repo.get("name")
+                or repo.get("html_url")
+                or ""
+            ).strip()
+            repo_name = raw_name.lower() if raw_name else "unknown"
+            # Ensure canonical fields are present for downstream steps
+            if raw_name and not repo.get("repo_name"):
+                repo["repo_name"] = raw_name
+            if raw_name and not repo.get("name"):
+                repo["name"] = repo.get("name") or raw_name
 
-            # Check if repository is already in our dictionary from existing file
-            if repo_name in repo_dict:
+            # If force_reprocess, always process; otherwise check existing data
+            if not force_reprocess and repo_name != "unknown" and repo_name in repo_dict:
                 existing_repo = repo_dict[repo_name]
                 # Check if it already has valid summary and tags and no errors
                 has_summary = (
@@ -298,7 +336,13 @@ class RepoSummarizer:
             logger.debug(f"Summary: {repo.get('summary', 'None')[:50]}...")
             logger.debug(f"Tags: {repo.get('tags', [])}")
 
-            if has_summary and has_tags and not has_error:
+            if (
+                not force_reprocess
+                and has_summary
+                and has_tags
+                and not has_error
+                and repo_name != "unknown"
+            ):
                 logger.info(f"Skipping {repo_name}: already has valid summary and tags")
                 already_processed.append(repo)
                 # Update dictionary

@@ -614,6 +614,7 @@ Notes:
 - Compose file only runs API + Qdrant; Ollama is intentionally **not** containerized for better local performance.
 - API healthcheck uses `/healthz`; Qdrant exposed on `localhost:6333`.
 - Compose consumes `.env` for secrets; ensure `./run.sh setup` or manual `.env` creation precedes `stack up`.
+- Setup helper can optionally force re-summarization (`--force-reprocess`) if you want to refresh summaries/tags even when an output file already exists.
 
 ---
 

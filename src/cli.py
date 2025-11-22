@@ -457,6 +457,7 @@ async def _process_repos(
     debug: bool = False,
     output_file: Optional[Path] = None,
     concurrency: Optional[int] = 2,
+    force_reprocess: bool = False,
 ) -> List[Dict[str, Any]]:
     """Process repositories through the full pipeline.
 
@@ -527,7 +528,7 @@ async def _process_repos(
 
                 # Process in batch with concurrency and pass output_file for incremental saving
                 enriched_repos = await summarizer.summarize_batch(
-                    repos, output_file=output_file
+                    repos, output_file=output_file, force_reprocess=force_reprocess
                 )
 
                 # Show summaries
@@ -877,6 +878,11 @@ def embed(
         "-c",
         help="Number of concurrent summarization tasks (default: 2)",
     ),
+    force_reprocess: bool = typer.Option(
+        False,
+        "--force-reprocess/--respect-existing",
+        help="Force re-summarization even if summaries/tags already exist in output file",
+    ),
     skip_existing: bool = typer.Option(
         True,
         "--skip-existing/--reprocess-all",
@@ -901,6 +907,7 @@ def embed(
                 debug=debug,
                 output_file=output_file if incremental_save else None,
                 concurrency=concurrency,
+                force_reprocess=force_reprocess,
             )
         )
 

@@ -222,6 +222,9 @@ def run_ingestion() -> None:
         return
 
     if yes_no("Generate summaries + embeddings and push to Qdrant now?", default=True):
+        force_args: list[str] = []
+        if yes_no("Force re-summarize even if summaries exist?", default=False):
+            force_args = ["--force-reprocess"]
         run_cmd(
             [
                 sys.executable,
@@ -234,7 +237,7 @@ def run_ingestion() -> None:
                 "4",
                 "--output",
                 "enriched_repos.json",
-            ],
+            ] + force_args,
             label="embed",
         )
 

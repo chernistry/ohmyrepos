@@ -18,7 +18,7 @@ from tenacity import (
     retry_if_exception_type,
 )
 
-from src.config import QdrantConfig, settings
+from src.config import QdrantConfig, settings, EmbeddingProviderType
 from src.core.logging import LoggerMixin, PerformanceLogger, log_exception
 from src.core.models import RepositoryData, SearchResult
 
@@ -668,7 +668,9 @@ class QdrantStore(LoggerMixin):
                 # Extract repo names
                 for point in points:
                     if "repo_name" in point.payload:
-                        existing_repos.add(point.payload["repo_name"])
+                        name = point.payload["repo_name"]
+                        if name:
+                            existing_repos.add(str(name))
 
                 # Check if done
                 if not next_offset or len(points) == 0:
@@ -811,17 +813,20 @@ class QdrantStore(LoggerMixin):
             existing_repos = set()
             
         # Create embedding provider with API key from environment
+        embedding_config = settings.embedding
+        provider_type = embedding_config.provider if embedding_config else None
         api_key = None
-        try:
-            if settings.embedding and settings.embedding.api_key:
-                api_key = settings.embedding.api_key.get_secret_value()
-        except Exception:
-            api_key = None
-        api_key = api_key or os.getenv("EMBEDDING_MODEL_API_KEY")
-        if not api_key:
-            raise ValueError(
-                "Embedding API key missing. Configure settings.embedding or EMBEDDING_MODEL_API_KEY."
-            )
+        if provider_type != EmbeddingProviderType.OLLAMA:
+            try:
+                if embedding_config and embedding_config.api_key:
+                    api_key = embedding_config.api_key.get_secret_value()
+            except Exception:
+                api_key = None
+            api_key = api_key or os.getenv("EMBEDDING_MODEL_API_KEY")
+            if not api_key:
+                raise ValueError(
+                    "Embedding API key missing. Configure settings.embedding or EMBEDDING_MODEL_API_KEY."
+                )
 
         embedding_provider = EmbeddingFactory.get_provider(api_key=api_key)
         
@@ -836,11 +841,22 @@ class QdrantStore(LoggerMixin):
             
             # Generate embeddings for repositories that need them
             for repo in batch:
-                repo_name = repo.get("repo_name", "")
+                repo_name = (
+                    repo.get("repo_name")
+                    or repo.get("full_name")
+                    or repo.get("name")
+                    or repo.get("repo_url")
+                    or ""
+                )
+                repo_name = str(repo_name).strip()
                 
                 # Skip if already has embedding
-                if repo_name in existing_repos:
+                if repo_name and repo_name in existing_repos:
                     repo["has_embedding"] = True
+                    continue
+                if not repo_name:
+                    self.logger.warning("Skipping repository without name/full_name")
+                    repo["has_embedding"] = False
                     continue
                     
                 # Check if repository has valid summary
@@ -875,14 +891,22 @@ class QdrantStore(LoggerMixin):
                     # Convert to RepositoryData objects
                     repo_objects = []
                     for repo_dict in repos_to_embed:
+                        repo_name = (
+                            repo_dict.get("repo_name")
+                            or repo_dict.get("full_name")
+                            or repo_dict.get("name")
+                            or repo_dict.get("repo_url")
+                            or ""
+                        )
+                        repo_name = str(repo_name).strip()
                         from src.core.models import RepositoryData
                         
                         # Clean and limit tags to 20
                         tags = [t.strip() for t in repo_dict.get("tags", []) if t and t.strip()][:20]
                         
                         repo_obj = RepositoryData(
-                            repo_name=repo_dict.get("repo_name", ""),
-                            repo_url=repo_dict.get("repo_url", ""),
+                            repo_name=repo_name,
+                            repo_url=repo_dict.get("repo_url") or repo_dict.get("html_url", ""),
                             summary=repo_dict.get("summary", ""),
                             description=repo_dict.get("description", ""),
                             tags=tags,
