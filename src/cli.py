@@ -62,9 +62,14 @@ def agent_discover(
         "-c",
         help="Specific category to focus on",
     ),
+    skip_profile: bool = typer.Option(
+        False,
+        "--skip-profile",
+        help="Skip profile analysis and go straight to search",
+    ),
 ):
     """Discover new repositories based on your interests."""
-    run_discovery(repo_file, max_results, category)
+    run_discovery(repo_file, max_results, category, skip_profile)
 
 
 @app.command()

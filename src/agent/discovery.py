@@ -19,7 +19,8 @@ console = Console()
 def discover(
     repos_path: Path,
     max_results: int = 20,
-    category: Optional[str] = None
+    category: Optional[str] = None,
+    skip_profile: bool = False
 ):
     """Run the discovery pipeline.
 
@@ -27,26 +28,37 @@ def discover(
         repos_path: Path to the local repositories JSON file.
         max_results: Maximum number of repositories to recommend.
         category: Optional specific category to focus on.
+        skip_profile: If True, skip profile analysis and go straight to search.
     """
-    asyncio.run(_discover_async(repos_path, max_results, category))
+    asyncio.run(_discover_async(repos_path, max_results, category, skip_profile))
 
 async def _discover_async(
     repos_path: Path,
     max_results: int = 20,
-    category: Optional[str] = None
+    category: Optional[str] = None,
+    skip_profile: bool = False
 ):
     console.print("[bold blue]GitHub Discovery Agent[/bold blue]")
-    console.print(f"Analyzing profile from: {repos_path}")
-
-    # Stage 1: Profile Analysis
-    clusters = analyze_profile(repos_path)
     
-    if not clusters:
-        console.print("[yellow]No interest clusters found. Try starring more repos![/yellow]")
-        return
+    clusters = []
+    if not skip_profile:
+        console.print(f"Analyzing profile from: {repos_path}")
 
-    console.print("\n[bold]Identified Interest Clusters:[/bold]")
-    _print_clusters(clusters)
+        # Stage 1: Profile Analysis
+        clusters = analyze_profile(repos_path)
+        
+        if not clusters:
+            console.print("[yellow]No interest clusters found. Try starring more repos![/yellow]")
+            # Don't return here, allow falling through to custom query if desired, 
+            # or maybe we should return if not skipping? 
+            # The original code returned. Let's keep it consistent but allow skip.
+            if not category: # If no category and no clusters, we can't do much unless we force custom query
+                 pass 
+    
+        console.print("\n[bold]Identified Interest Clusters:[/bold]")
+        _print_clusters(clusters)
+    else:
+        console.print("[dim]Skipping profile analysis...[/dim]")
 
     # Stage 2: Selection
     intent = category
