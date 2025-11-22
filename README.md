@@ -21,6 +21,8 @@ The project consists of:
 - **Next.js frontend** – interactive search grid and AI chat UI.
 - **CLI pipeline** – collection, summarization and embedding of repositories.
 
+![Oh My Repos Dashboard](assets/screenshot.png)
+
 ---
 
 ## Key Features
@@ -68,28 +70,31 @@ Set at least:
 - `EMBEDDING_MODEL_API_KEY` – embedding + reranker provider key (e.g. Jina).
 - `CHAT_LLM_PROVIDER`, `CHAT_LLM_BASE_URL`, `CHAT_LLM_MODEL`, `CHAT_LLM_API_KEY` – LLM provider configuration.
 
-### 3. Start backend API
+### 3. Start backend and frontend (local dev)
+
+Recommended: use the helper script to run both services:
+
+```bash
+./run.sh dev
+# Backend: http://127.0.0.1:8000
+# Frontend: http://localhost:3000
+```
+
+You can also control services separately:
 
 ```bash
 ./run.sh b start
-# FastAPI will listen on http://127.0.0.1:8000
+./run.sh f start
 ```
 
-### 4. Start Next.js frontend
+The first time you run the UI, install dependencies:
 
 ```bash
 cd ui
 npm install
-npm run dev
-# or from repo root:
-# ./run.sh f start
 ```
 
-Open the UI:
-
-- Search & chat: `http://localhost:3000`
-
-### 5. (Optional) Ingest your repositories via CLI
+### 4. (Optional) Ingest your repositories via CLI
 
 Once environment and Qdrant are configured, you can index your own repositories using the CLI:
 
@@ -103,6 +108,17 @@ python ohmyrepos.py embed --input repos.json --skip-collection \
 ```
 
 The Next.js UI will then query the hybrid search API backed by your Qdrant collection.
+
+### 5. (Optional) Docker stack (API + Qdrant)
+
+To run the API together with a local Qdrant instance in Docker:
+
+```bash
+./run.sh stack up   # starts api (uvicorn) + qdrant
+./run.sh stack down # stops and removes containers
+```
+
+The API will be exposed on `http://localhost:8000`. Ollama is expected to run directly on the host (for example at `http://127.0.0.1:11434`), not in Docker.
 
 ---
 
@@ -120,58 +136,4 @@ The Next.js UI will then query the hybrid search API backed by your Qdrant colle
 
 ---
 
-## Architecture (High Level)
-
-The system exposes a single user-facing surface (Next.js UI) that talks to the FastAPI backend. The backend coordinates BM25 search over `repos.json`, vector search over Qdrant, and optionally LLMs for summarization, reranking and chat.
-
-```mermaid
-graph LR
-  User[Browser] --> UI[Next.js UI (ui/)]
-  UI -->|/api/v1/search,/chat| API[FastAPI API]
-  API --> Search[HybridRetriever]
-  Search --> Qdrant[(Qdrant Vector DB)]
-  Search --> BM25[BM25 over repos.json]
-  API --> Chat[Chat / RAG Engine]
-  Chat --> LLM[LLMGenerator (OpenAI/OpenRouter/Ollama)]
-  LLM --> Qdrant
-```
-
-Key flows:
-
-- **Search** – UI sends queries to `/api/v1/search`, FastAPI uses `HybridRetriever` to combine BM25 + vector search and returns normalized results.
-- **Chat** – UI streams from `/api/v1/chat` via SSE; the backend performs a short RAG retrieval step, then streams LLM output chunk-by-chunk as `data: {"chunk": "..."}\n\n`.
-- **Ingestion** – CLI commands (`collect`, `summarize`, `embed`, `ingest`) run the GitHub → LLM → embeddings → Qdrant pipeline in batch mode.
-
----
-
-## Additional Details
-
-<details>
-<summary>CLI commands (summary)</summary>
-
-- `python ohmyrepos.py collect` – fetch starred repositories from GitHub.
-- `python ohmyrepos.py summarize` – LLM-based summarization for repositories in a JSON file.
-- `python ohmyrepos.py embed` – full pipeline: collect/summarize/embed/store.
-- `python ohmyrepos.py search` – run hybrid search from the terminal.
-- `python ohmyrepos.py ingest` / `reindex` – ingest and reindex repositories into Qdrant.
-
-Full CLI and pipeline details are documented in `docs/IMPLEMENTATION.md`.
-
-</details>
-
-<details>
-<summary>Local Qdrant and Ollama (optional)</summary>
-
-- A `docker-compose.yml` is provided to run:
-  - local Qdrant (`qdrant/qdrant`) on `localhost:6333`,
-  - local Ollama (`ollama/ollama`) on `localhost:11434`.
-- For local-only setups, set:
-  - `QDRANT_URL=http://localhost:6333`,
-  - `CHAT_LLM_PROVIDER=ollama`, `OLLAMA_BASE_URL=http://127.0.0.1:11434`.
-
-</details>
-
----
-
 📚 [Detailed Implementation Guide](docs/IMPLEMENTATION.md)
-

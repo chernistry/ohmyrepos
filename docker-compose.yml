@@ -1,34 +1,31 @@
 version: '3.8'
 
 services:
-  ohmyrepos:
-    build: 
+  api:
+    build:
       context: .
-      target: production
-    container_name: ohmyrepos-app
-    ports:
-      - "8501:8501"
+      dockerfile: Dockerfile.api
+    container_name: ohmyrepos-api
     environment:
       - ENVIRONMENT=production
       - GITHUB_USERNAME=${GITHUB_USERNAME}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - CHAT_LLM_API_KEY=${CHAT_LLM_API_KEY}
       - EMBEDDING_MODEL_API_KEY=${EMBEDDING_MODEL_API_KEY}
-      - QDRANT_URL=${QDRANT_URL}
-      - QDRANT_API_KEY=${QDRANT_API_KEY}
-    volumes:
-      - repo_data:/app/data
-      - app_logs:/app/logs
+      - QDRANT_URL=http://qdrant:6333
+    ports:
+      - "8000:8000"
+    depends_on:
+      - qdrant
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8501/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
     networks:
       - ohmyrepos-network
 
-  # Optional: Local Qdrant instance
   qdrant:
     image: qdrant/qdrant:latest
     container_name: ohmyrepos-qdrant
@@ -42,23 +39,8 @@ services:
     networks:
       - ohmyrepos-network
 
-  # Optional: Ollama for local LLM
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ohmyrepos-ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    restart: unless-stopped
-    networks:
-      - ohmyrepos-network
-
 volumes:
-  repo_data:
-  app_logs:
   qdrant_data:
-  ollama_data:
 
 networks:
   ohmyrepos-network:

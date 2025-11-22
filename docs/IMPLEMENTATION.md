@@ -76,9 +76,8 @@ graph TD
     end
 
     subgraph "Interface Layer"
-        CLI[Typer CLI<br/>Batch Operations]
-        NEXTJS[Next.js Web UI<br/>Search & Chat]
-        STREAMLIT[Streamlit UI<br/>(legacy)]
+        CLI[Typer CLI and batch tools]
+        NEXTJS[Next.js Web UI]
     end
 
     GITHUB --> COLLECTOR
@@ -103,21 +102,20 @@ graph TD
     
     AI_RERANKER --> CLI
     AI_RERANKER --> NEXTJS
-    AI_RERANKER --> STREAMLIT
 ```
 
 ### Backend/Frontend/Infra Integration
 
 ```mermaid
 graph LR
-    Browser[Browser] --> NextUI[Next.js UI (ui/)]
-    NextUI -->|/api/v1/search,/chat| FastAPI[FastAPI API (src/api)]
-    FastAPI --> Hybrid[HybridRetriever (BM25 + Qdrant)]
-    FastAPI --> ChatLLM[LLMGenerator (RAG Chat)]
-    Hybrid --> Qdrant[(Qdrant Vector DB)]
+    Browser[Browser] --> NextUI[Next.js UI]
+    NextUI --> FastAPI[FastAPI API]
+    FastAPI --> Hybrid[HybridRetriever]
+    FastAPI --> ChatLLM[LLMGenerator]
+    Hybrid --> Qdrant[(Qdrant)]
     Hybrid --> BM25[BM25 over repos.json]
     ChatLLM --> Qdrant
-    ChatLLM --> LLM[OpenAI / OpenRouter / Ollama]
+    ChatLLM --> LLM[LLM Provider]
 ```
 
 ---
@@ -129,23 +127,23 @@ graph LR
 ```mermaid
 graph LR
     subgraph "Collection Phase"
-        A[GitHub Starred<br/>Repositories] --> B[API Rate Limiting<br/>& Pagination]
-        B --> C[README Content<br/>Extraction]
-        C --> D[Metadata<br/>Enrichment]
+        A[GitHub starred repositories] --> B[API rate limiting and pagination]
+        B --> C[README content extraction]
+        C --> D[Metadata enrichment]
     end
 
     subgraph "Analysis Phase"
-        D --> E[LLM Prompt<br/>Construction]
-        E --> F[Concurrent<br/>Summarization]
-        F --> G[Tag Extraction<br/>& Validation]
-        G --> H[Quality<br/>Filtering]
+        D --> E[LLM prompt construction]
+        E --> F[Concurrent summarization]
+        F --> G[Tag extraction and validation]
+        G --> H[Quality filtering]
     end
 
     subgraph "Indexing Phase"
-        H --> I[Vector Embedding<br/>Generation]
-        I --> J[Qdrant Storage<br/>with Metadata]
-        H --> K[BM25 Index<br/>Creation]
-        J --> L[Search-Ready<br/>Repository Store]
+        H --> I[Vector embedding generation]
+        I --> J[Qdrant storage with metadata]
+        H --> K[BM25 index creation]
+        J --> L[Search-ready repository store]
         K --> L
     end
 
@@ -783,4 +781,3 @@ LOG_LEVEL=DEBUG
 ---
 
 This implementation guide should be kept in sync with the codebase. When significant architecture changes are introduced, update both the diagrams and the ADR section to reflect the new design.
-

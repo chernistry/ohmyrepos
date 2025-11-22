@@ -285,7 +285,7 @@ async def _collect_repos(existing_names: Optional[set] = None) -> List[Dict[str,
     Returns:
         List of repository data
     """
-    collector = RepoCollector()
+    collector = RepoCollector(max_concurrent=50)
     try:
         repos = []
         async for repo in collector.collect_starred_repos(skip_existing=existing_names):
@@ -477,7 +477,7 @@ async def _process_repos(
         repos = json.loads(input_file.read_text(encoding="utf-8"))
     else:
         console.print("Collecting repositories from GitHub")
-        collector = RepoCollector()
+        collector = RepoCollector(max_concurrent=50)
         try:
             repos = []
             async for repo in collector.collect_starred_repos():

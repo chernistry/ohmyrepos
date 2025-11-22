@@ -86,7 +86,7 @@ export function RepoGrid({ query }: RepoGridProps) {
                     id: repo.url || `repo-${index}`,
                     owner: repo.full_name.split('/')[0] || 'unknown',
                     name: repo.repo_name,
-                    description: repo.description || repo.summary || '',
+                    description: repo.summary || repo.description || '',
                     stars: repo.stars,
                     language: repo.language || 'Unknown',
                     updatedAt: 'Recently', // API doesn't return this yet
