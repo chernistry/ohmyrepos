@@ -10,6 +10,7 @@ from rich.prompt import Prompt
 
 from src.agent.profile import analyze_profile, InterestCluster
 from src.agent.search import search_github, get_local_repos
+from src.agent.scoring import score_candidates
 from src.core.storage import QdrantStore
 
 logger = logging.getLogger("ohmyrepos.agent.discovery")
@@ -49,6 +50,8 @@ async def _discover_async(
 
     # Stage 2: Selection
     selected_query = category
+    selected_cluster = None
+    
     if not selected_query:
         # Interactive selection
         choices = [c.name for c in clusters] + ["Custom Query"]
@@ -60,12 +63,14 @@ async def _discover_async(
         choice_idx = int(Prompt.ask("Enter number", default="1")) - 1
         
         if 0 <= choice_idx < len(clusters):
-            cluster = clusters[choice_idx]
+            selected_cluster = clusters[choice_idx]
             # Construct query from cluster keywords
-            selected_query = f"language:{cluster.languages[0]} " + " ".join(cluster.keywords[:3])
-            console.print(f"[green]Selected cluster: {cluster.name}[/green]")
+            selected_query = f"language:{selected_cluster.languages[0]} " + " ".join(selected_cluster.keywords[:3])
+            console.print(f"[green]Selected cluster: {selected_cluster.name}[/green]")
         else:
             selected_query = Prompt.ask("Enter your search query")
+            # Create a dummy cluster for custom query
+            selected_cluster = InterestCluster(name="Custom", keywords=selected_query.split(), languages=[], score=1.0)
 
     console.print(f"\n[bold]Searching GitHub for:[/bold] '{selected_query}'")
 
@@ -94,25 +99,37 @@ async def _discover_async(
         console.print("[yellow]No new repositories found matching your criteria.[/yellow]")
         return
 
-    console.print(f"\n[bold green]Found {len(candidates)} candidates:[/bold green]")
+    console.print(f"\n[bold]Scoring {len(candidates)} candidates...[/bold]")
+
+    # Stage 4: Scoring
+    scored_results = await score_candidates(candidates, selected_cluster)
+    
+    # Filter low scores
+    high_quality_results = [r for r in scored_results if r.score >= 7.0]
+
+    if not high_quality_results:
+        console.print("[yellow]No high-quality repositories found (Score >= 7.0).[/yellow]")
+        return
+
+    console.print(f"\n[bold green]Found {len(high_quality_results)} top recommendations:[/bold green]")
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("Name")
-    table.add_column("Stars")
-    table.add_column("Language")
-    table.add_column("Description")
+    table.add_column("Score")
+    table.add_column("Reasoning")
+    table.add_column("URL")
     
-    for repo in candidates:
+    for item in high_quality_results:
         table.add_row(
-            f"[link={repo.url}]{repo.full_name}[/link]",
-            str(repo.stars),
-            repo.language or "N/A",
-            (repo.description or "")[:50] + "..."
+            item.repo.full_name,
+            f"{item.score:.1f}",
+            item.reasoning,
+            f"[link={item.repo.url}]Link[/link]"
         )
     
     console.print(table)
     
     # Placeholder for future stages
-    console.print("\n[dim]Scoring stage is not yet implemented.[/dim]")
+    console.print("\n[dim]Actions stage (Star/Ingest) is not yet implemented.[/dim]")
 
 def _print_clusters(clusters: List[InterestCluster]):
     table = Table(show_header=True, header_style="bold magenta")

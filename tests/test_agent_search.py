@@ -1,6 +1,31 @@
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
-from src.agent.search import search_github, get_local_repos, RepoMetadata
+from unittest.mock import patch, Mock
+from src.agent.search import search_github, get_local_repos
+
+class MockResponse:
+    def __init__(self, json_data, status_code=200):
+        self._json_data = json_data
+        self.status_code = status_code
+
+    def json(self):
+        return self._json_data
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise Exception(f"HTTP Error: {self.status_code}")
+
+class MockAsyncClient:
+    def __init__(self, response_data):
+        self.response_data = response_data
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    async def get(self, url, **kwargs):
+        return MockResponse(self.response_data)
 
 @pytest.mark.asyncio
 async def test_search_github_success():
@@ -29,15 +54,7 @@ async def test_search_github_success():
         ]
     }
 
-    with patch("httpx.AsyncClient") as MockClient:
-        mock_instance = MockClient.return_value
-        mock_instance.__aenter__.return_value = mock_instance
-        mock_instance.__aexit__.return_value = None
-        
-        mock_instance.get.return_value.status_code = 200
-        mock_instance.get.return_value.json.return_value = mock_response
-        mock_instance.get.return_value.raise_for_status = Mock()
-
+    with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response)):
         results = await search_github("test query")
         
         assert len(results) == 2
@@ -66,15 +83,7 @@ async def test_search_github_dedup():
         ]
     }
 
-    with patch("httpx.AsyncClient") as MockClient:
-        mock_instance = MockClient.return_value
-        mock_instance.__aenter__.return_value = mock_instance
-        mock_instance.__aexit__.return_value = None
-
-        mock_instance.get.return_value.status_code = 200
-        mock_instance.get.return_value.json.return_value = mock_response
-        mock_instance.get.return_value.raise_for_status = Mock()
-
+    with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response)):
         excluded = {"owner/repo1"}
         results = await search_github("test query", excluded_repos=excluded)
         
